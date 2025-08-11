@@ -221,13 +221,23 @@ jobs:
             libgl1-mesa-dev \
             libglib2.0-0 \
             libgomp1 \
-            xvfb
+            xvfb \
+            upx-ucl \
+            binutils
 
       - name: Install system dependencies (macOS)
         if: steps.should_build.outputs.build == 'true' && matrix.platform == 'macos'
         run: |
           # Install tkinter if needed (usually comes with Python on macOS)
           brew install python-tk || true
+          # Install UPX for better compression
+          brew install upx || true
+
+      - name: Install system dependencies (Windows)
+        if: steps.should_build.outputs.build == 'true' && matrix.os == 'windows-latest'
+        run: |
+          # Install UPX for better compression
+          choco install upx -y || echo "UPX installation failed, continuing without it"
 
       - name: Create virtual environment
         if: steps.should_build.outputs.build == 'true'
@@ -354,7 +364,10 @@ jobs:
               ['src/main.py'],
               pathex=[],
               binaries=[],
-              datas=[],
+              datas=[
+                  ('icons/*', 'icons'),  # Include icon files
+                  ('example_config.toml', '.'),  # Include example config
+              ],
               hiddenimports=[
                   'tkinter',
                   'tkinter.ttk',
@@ -391,24 +404,26 @@ jobs:
               a.zipfiles,
               a.datas,
               [],
-              name='pdf-translator-gui',
+              name='babeldoc_gui',
               debug=False,
               bootloader_ignore_signals=False,
               strip=False,
               upx=True,
               upx_exclude=[],
               runtime_tmpdir=None,
+              onefile=True,  # Create a single executable file
+              noupx=False,
               console=False,  # Set to False for GUI app
               disable_windowed_traceback=False,
               argv_emulation=False,
               target_arch=''' + repr(target_arch) + ''',
               codesign_identity=None,
               entitlements_file=None,
-              icon=None,  # Add icon file path here if you have one
+              icon='icons/app_icon.ico' if '${{ matrix.os }}' == 'windows-latest' else ('icons/app_icon.icns' if '${{ matrix.os }}' == 'macos-latest' else None),  # Add platform-specific icons
           )
           '''
           
-          with open('pdf-translator.spec', 'w') as f:
+          with open('babeldoc_gui.spec', 'w') as f:
               f.write(spec_content)
           "
 
@@ -429,7 +444,7 @@ jobs:
           fi
           
           # Build with PyInstaller using the spec file
-          pyinstaller pdf-translator.spec
+          pyinstaller babeldoc_gui.spec
 
       - name: Verify build
         if: steps.should_build.outputs.build == 'true'
@@ -437,9 +452,9 @@ jobs:
         run: |
           ls -la dist/
           if [ "${{ matrix.os }}" = "windows-latest" ]; then
-            file dist/pdf-translator-gui.exe
+            file dist/babeldoc_gui.exe
           else
-            file dist/pdf-translator-gui
+            file dist/babeldoc_gui
           fi
 
       - name: Test executable (basic smoke test)
@@ -451,13 +466,13 @@ jobs:
           if [ "${{ matrix.os }}" = "ubuntu-latest" ]; then
             # Use xvfb for Ubuntu headless testing
             export DISPLAY=:99
-            timeout 10 ./dist/pdf-translator-gui --help || echo "GUI test skipped (expected for headless environment)"
+            timeout 10 ./dist/babeldoc_gui --help || echo "GUI test skipped (expected for headless environment)"
           elif [ "${{ matrix.os }}" = "macos-latest" ]; then
             # For macOS, test might fail in headless environment, that's OK
-            timeout 10 ./dist/pdf-translator-gui --help || echo "GUI test skipped (expected for headless macOS environment)"
+            timeout 10 ./dist/babeldoc_gui --help || echo "GUI test skipped (expected for headless macOS environment)"
           else
             # Windows
-            timeout 10 ./dist/pdf-translator-gui.exe --help || echo "GUI test skipped (expected for headless environment)"
+            timeout 10 ./dist/babeldoc_gui.exe --help || echo "GUI test skipped (expected for headless environment)"
           fi
 
       - name: Create archive name
@@ -468,17 +483,17 @@ jobs:
           if [ "${{ github.event_name }}" = "push" ]; then
             # For releases, use the tag name
             if [ "${{ matrix.platform }}" = "macos" ] && [ "${{ matrix.arch }}" = "arm64" ]; then
-              ARCHIVE_NAME="pdf-translator-gui-${{ matrix.platform }}-${{ matrix.arch }}"
+              ARCHIVE_NAME="babeldoc_gui-${{ matrix.platform }}-${{ matrix.arch }}"
             else
-              ARCHIVE_NAME="pdf-translator-gui-${{ matrix.platform }}-${{ matrix.arch }}"
+              ARCHIVE_NAME="babeldoc_gui-${{ matrix.platform }}-${{ matrix.arch }}"
             fi
           else
             # For manual builds, add timestamp
             TIMESTAMP=$(date +%Y%m%d-%H%M%S)
             if [ "${{ matrix.platform }}" = "macos" ] && [ "${{ matrix.arch }}" = "arm64" ]; then
-              ARCHIVE_NAME="pdf-translator-gui-${{ matrix.platform }}-${{ matrix.arch }}-${TIMESTAMP}"
+              ARCHIVE_NAME="babeldoc_gui-${{ matrix.platform }}-${{ matrix.arch }}-${TIMESTAMP}"
             else
-              ARCHIVE_NAME="pdf-translator-gui-${{ matrix.platform }}-${{ matrix.arch }}-${TIMESTAMP}"
+              ARCHIVE_NAME="babeldoc_gui-${{ matrix.platform }}-${{ matrix.arch }}-${TIMESTAMP}"
             fi
           fi
           echo "ARCHIVE_NAME=$ARCHIVE_NAME" >> $GITHUB_OUTPUT
@@ -489,13 +504,13 @@ jobs:
         shell: bash
         run: |
           cd dist
-          tar -czf "../${{ steps.archive_name.outputs.ARCHIVE_NAME }}${{ matrix.archive_extension }}" pdf-translator-gui${{ matrix.binary_extension }}
+          tar -czf "../${{ steps.archive_name.outputs.ARCHIVE_NAME }}${{ matrix.archive_extension }}" babeldoc_gui${{ matrix.binary_extension }}
 
       - name: Create archive (Windows)
         if: steps.should_build.outputs.build == 'true' && matrix.os == 'windows-latest'
         run: |
           cd dist
-          7z a "../${{ steps.archive_name.outputs.ARCHIVE_NAME }}${{ matrix.archive_extension }}" pdf-translator-gui${{ matrix.binary_extension }}
+          7z a "../${{ steps.archive_name.outputs.ARCHIVE_NAME }}${{ matrix.archive_extension }}" babeldoc_gui${{ matrix.binary_extension }}
 
       - name: Upload Release Asset
         if: steps.should_build.outputs.build == 'true' && needs.create-release.result == 'success'

@@ -1179,7 +1179,7 @@ Current status: Using fallback method (click to select files)"""
             response = requests.get(f"{url}/api/tags", timeout=5)
             if response.status_code == 200:
                 self.connection_status_var.set("✓ Connected to Ollama")
-                self.connection_status_var.set("green")
+                self.connection_status_var.set("Connected.")
                 self.log_message("Successfully connected to Ollama server")
                 return True
             else:
