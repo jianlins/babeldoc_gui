@@ -1,0 +1,44 @@
+#!/bin/bash
+
+# Get the directory of this script (inside the app bundle)
+APP_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+SCRIPT_DIR="$(dirname "$APP_DIR")"
+
+# Find the project directory (assume it's in the same directory as the .app)
+PROJECT_DIR="$SCRIPT_DIR"
+
+# Look for the main Python script
+MAIN_SCRIPT="$PROJECT_DIR/src/main.py"
+
+if [ ! -f "$MAIN_SCRIPT" ]; then
+    # Try alternative locations
+    for possible_dir in "$PROJECT_DIR" "$PROJECT_DIR/transui" "$HOME/Projects/PycharmProjects/transui"; do
+        if [ -f "$possible_dir/src/main.py" ]; then
+            PROJECT_DIR="$possible_dir"
+            MAIN_SCRIPT="$possible_dir/src/main.py"
+            break
+        fi
+    done
+fi
+
+if [ ! -f "$MAIN_SCRIPT" ]; then
+    osascript -e 'display alert "PDF Translator Error" message "Could not find main.py script. Please ensure the app is in the same directory as the project files."'
+    exit 1
+fi
+
+# Change to project directory
+cd "$PROJECT_DIR"
+
+# Try to activate conda environment and run the application
+if command -v conda >/dev/null 2>&1; then
+    # Try with conda
+    if conda env list | grep -q "^pdf "; then
+        exec conda run --name pdf python "$MAIN_SCRIPT"
+    else
+        # Fallback to system python
+        exec python3 "$MAIN_SCRIPT"
+    fi
+else
+    # Fallback to system python
+    exec python3 "$MAIN_SCRIPT"
+fi

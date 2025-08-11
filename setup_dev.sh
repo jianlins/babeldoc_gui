@@ -20,7 +20,7 @@ if conda env list | grep -q "^pdf "; then
 else
     echo "❌ Conda environment 'pdf' not found"
     echo "Please create it with BabelDOC installed:"
-    echo "  conda create -n pdf python=3.9"
+    echo "  conda create -n pdf python=3.12"
     echo "  conda activate pdf"
     echo "  pip install babeldoc"
     exit 1

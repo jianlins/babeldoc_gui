@@ -5,11 +5,13 @@ A Python GUI application for translating PDF files to Chinese using BabelDOC and
 """
 
 import asyncio
+import base64
 import json
 import logging
 import os
 import platform
 import sys
+import tempfile
 import threading
 import tkinter as tk
 import urllib.parse
@@ -92,6 +94,7 @@ class DragDropMixin:
     
     def __init__(self):
         self.drag_drop_enabled = False
+        self.drag_drop_method = None
         
     def enable_drag_drop(self, widget, callback):
         """Enable drag and drop on a widget with a callback function"""
@@ -99,84 +102,200 @@ class DragDropMixin:
         self.drop_callback = callback
         
         # Try different drag and drop implementations based on platform
+        success = False
+        
+        # First try the modern maintained tkinterdnd2 (with ARM support)
         try:
-            self._setup_drag_drop_native(widget)
-        except:
-            # Fallback to simpler implementation
+            success = self._setup_drag_drop_tkinterdnd2(widget)
+            if success:
+                self.drag_drop_method = "tkinterdnd2"
+                self.logger.info("Using tkinterdnd2 for drag and drop")
+        except Exception as e:
+            self.logger.debug(f"tkinterdnd2 not available: {e}")
+        
+        # Fallback to built-in tkinter.dnd (experimental)
+        if not success:
             try:
-                self._setup_drag_drop_simple(widget)
+                success = self._setup_drag_drop_builtin(widget)
+                if success:
+                    self.drag_drop_method = "builtin"
+                    self.logger.info("Using built-in tkinter.dnd for drag and drop")
             except Exception as e:
-                self.logger.warning(f"Drag and drop not available on this system: {e}")
+                self.logger.debug(f"Built-in drag and drop not available: {e}")
+        
+        # Final fallback to file dialog on click
+        if not success:
+            try:
+                self._setup_drag_drop_fallback(widget)
+                self.drag_drop_method = "fallback"
+                self.logger.warning("Drag and drop not available, using click-to-select fallback")
+            except Exception as e:
+                self.logger.error(f"All drag and drop methods failed: {e}")
                 self.drag_drop_enabled = False
     
-    def _setup_drag_drop_native(self, widget):
-        """Setup native drag and drop using tkinterdnd2 if available"""
+    def _setup_drag_drop_tkinterdnd2(self, widget):
+        """Setup drag and drop using the modern tkinterdnd2 library (with ARM support)"""
         try:
-            import tkinterdnd2 as tkdnd
+            import tkinterdnd2
+            from tkinterdnd2 import DND_FILES
             
-            # Convert the widget to support drag and drop
+            # Check if widget supports drag and drop
             if not hasattr(widget, 'tk'):
                 return False
-                
-            widget.drop_target_register(tkdnd.DND_FILES)
-            widget.dnd_bind('<<Drop>>', self._on_drop_event)
+            
+            # Register the widget as a drop target
+            widget.drop_target_register(DND_FILES)
+            widget.dnd_bind('<<Drop>>', self._on_drop_event_tkinterdnd2)
             widget.dnd_bind('<<DragEnter>>', self._on_drag_enter)
             widget.dnd_bind('<<DragLeave>>', self._on_drag_leave)
             
             return True
         except ImportError:
-            raise ImportError("tkinterdnd2 not available")
+            raise ImportError("tkinterdnd2 not available - install with: pip install tkinterdnd2")
         except Exception as e:
-            raise Exception(f"Failed to setup native drag drop: {e}")
+            raise Exception(f"Failed to setup tkinterdnd2 drag drop: {e}")
     
-    def _setup_drag_drop_simple(self, widget):
-        """Setup simple drag and drop fallback"""
-        # Bind to general events that might indicate file drops
-        widget.bind("<Button-1>", self._on_click)
+    def _setup_drag_drop_builtin(self, widget):
+        """Setup drag and drop using built-in tkinter.dnd (experimental)"""
+        try:
+            import tkinter.dnd as dnd
+            
+            # This is experimental and may not work well
+            # Bind basic events for visual feedback
+            widget.bind("<Enter>", self._on_enter)
+            widget.bind("<Leave>", self._on_leave)
+            widget.bind("<Button-1>", self._on_click_builtin)
+            
+            return True
+        except Exception as e:
+            raise Exception(f"Built-in DnD setup failed: {e}")
+    
+    def _setup_drag_drop_fallback(self, widget):
+        """Setup fallback drag and drop using click to open file dialog"""
+        widget.bind("<Button-1>", self._on_click_fallback)
         widget.bind("<Enter>", self._on_enter)
         widget.bind("<Leave>", self._on_leave)
         
         # Add visual feedback
-        original_bg = widget.cget("background") if hasattr(widget, 'cget') else None
-        widget._original_bg = original_bg
+        try:
+            original_bg = widget.cget("background") if hasattr(widget, 'cget') else None
+            widget._original_bg = original_bg
+        except:
+            pass
     
-    def _on_drop_event(self, event):
+    def _on_drop_event_tkinterdnd2(self, event):
         """Handle drop event from tkinterdnd2"""
         try:
-            files = event.data.split()
-            # Clean file paths (remove file:// prefix, decode URLs)
+            # Handle different data formats from tkinterdnd2
+            files_data = event.data
+            
+            # Parse file paths - tkinterdnd2 can return different formats
+            if isinstance(files_data, str):
+                # Split by spaces and handle quoted paths
+                import shlex
+                try:
+                    files = shlex.split(files_data)
+                except ValueError:
+                    # Fallback if shlex fails
+                    files = files_data.split()
+            elif isinstance(files_data, (list, tuple)):
+                files = list(files_data)
+            else:
+                files = [str(files_data)]
+            
+            # Clean file paths and filter PDFs
             cleaned_files = []
             for file_path in files:
-                if file_path.startswith('file://'):
-                    file_path = file_path[7:]  # Remove file:// prefix
-                file_path = urllib.parse.unquote(file_path)  # Decode URL encoding
+                file_path = str(file_path).strip()
                 
-                # Only accept PDF files
+                # Remove file:// prefix if present
+                if file_path.startswith('file://'):
+                    file_path = file_path[7:]
+                
+                # Decode URL encoding
+                file_path = urllib.parse.unquote(file_path)
+                
+                # Remove extra quotes
+                file_path = file_path.strip('"\'')
+                
+                # Only accept PDF files that exist
                 if file_path.lower().endswith('.pdf') and os.path.exists(file_path):
                     cleaned_files.append(file_path)
             
             if cleaned_files:
                 self.drop_callback(cleaned_files)
+                self.logger.info(f"Successfully processed {len(cleaned_files)} dropped PDF files")
             elif files:
                 messagebox.showwarning("Invalid Files", 
-                                     "Please drop only PDF files that exist on your system.")
+                                     "Please drop only PDF files that exist on your system.\n\n"
+                                     f"Dropped files: {', '.join([os.path.basename(f) for f in files[:3]])}...")
+                self.logger.warning(f"Invalid files dropped: {files}")
+            
         except Exception as e:
             self.logger.error(f"Error handling drop event: {e}")
             messagebox.showerror("Drop Error", f"Error processing dropped files: {e}")
     
+    def _on_click_builtin(self, event):
+        """Handle click event for built-in DnD"""
+        # For now, just provide visual feedback
+        self._on_click_fallback(event)
+    
+    def _on_click_fallback(self, event):
+        """Handle click event for fallback mode - open file dialog"""
+        try:
+            # Open file dialog as fallback
+            from tkinter import filedialog
+            files = filedialog.askopenfilenames(
+                title="Select PDF files (Drag and Drop Fallback)",
+                filetypes=[("PDF files", "*.pdf"), ("All files", "*.*")]
+            )
+            
+            if files:
+                self.drop_callback(list(files))
+                self.logger.info(f"Selected {len(files)} files via fallback dialog")
+                
+        except Exception as e:
+            self.logger.error(f"Error in fallback file selection: {e}")
+    
     def _on_drag_enter(self, event):
         """Handle drag enter event (visual feedback)"""
         try:
-            event.widget.configure(relief="solid", borderwidth=2)
-        except:
-            pass
+            widget = event.widget
+            # Save original appearance
+            if not hasattr(widget, '_original_relief'):
+                widget._original_relief = widget.cget("relief")
+                widget._original_borderwidth = widget.cget("borderwidth")
+            
+            # Change appearance to show drop zone is active
+            widget.configure(relief="solid", borderwidth=2)
+            
+            # Also update the label text if it's a label
+            if hasattr(widget, 'configure') and 'text' in widget.keys():
+                if not hasattr(widget, '_original_text'):
+                    widget._original_text = widget.cget("text")
+                widget.configure(text="🎯 Drop PDF files here!")
+                
+        except Exception as e:
+            self.logger.debug(f"Drag enter visual feedback failed: {e}")
     
     def _on_drag_leave(self, event):
         """Handle drag leave event"""
         try:
-            event.widget.configure(relief="flat", borderwidth=1)
-        except:
-            pass
+            widget = event.widget
+            
+            # Restore original appearance
+            if hasattr(widget, '_original_relief'):
+                widget.configure(
+                    relief=widget._original_relief,
+                    borderwidth=widget._original_borderwidth
+                )
+            
+            # Restore original text if it's a label
+            if hasattr(widget, '_original_text'):
+                widget.configure(text=widget._original_text)
+                
+        except Exception as e:
+            self.logger.debug(f"Drag leave visual feedback failed: {e}")
     
     def _on_enter(self, event):
         """Handle mouse enter event (visual feedback for fallback)"""
@@ -222,6 +341,9 @@ class PDFTranslatorGUI(DragDropMixin):
         # Setup logging
         self.setup_logging()
         
+        # Set up application icon (after logging is initialized)
+        self.setup_app_icon()
+        
         # Create GUI
         self.create_widgets()
         
@@ -238,6 +360,74 @@ class PDFTranslatorGUI(DragDropMixin):
             format='%(asctime)s - %(levelname)s - %(message)s'
         )
         self.logger = logging.getLogger(__name__)
+    
+    def setup_app_icon(self):
+        """Setup application icon for window and taskbar"""
+        try:
+            # Try to find the icon file
+            icon_paths = [
+                Path(__file__).parent.parent / "icons" / "app_icon.png",
+                Path(__file__).parent.parent / "icons" / "app_icon_64.png", 
+                Path(__file__).parent.parent / "icons" / "app_icon_32.png",
+                Path(__file__).parent / "icons" / "app_icon.png",
+                Path(__file__).parent / "app_icon.png"
+            ]
+            
+            icon_path = None
+            for path in icon_paths:
+                if path.exists():
+                    icon_path = path
+                    break
+            
+            if icon_path:
+                # Load the icon
+                icon_image = tk.PhotoImage(file=str(icon_path))
+                self.root.iconphoto(True, icon_image)
+                self.logger.info(f"Application icon loaded from: {icon_path}")
+                
+                # Store reference to prevent garbage collection
+                self.app_icon = icon_image
+                
+            else:
+                # Create a simple built-in icon if no file found
+                self.create_builtin_icon()
+                
+        except Exception as e:
+            self.logger.warning(f"Could not set application icon: {e}")
+            try:
+                # Fallback to built-in icon
+                self.create_builtin_icon()
+            except Exception as e2:
+                self.logger.warning(f"Could not create fallback icon: {e2}")
+    
+    def create_builtin_icon(self):
+        """Create a simple built-in icon using tkinter"""
+        try:
+            # Create a simple 32x32 icon programmatically
+            icon_data = """
+R0lGODlhIAAgAPcAAP///wAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAPn5+fn5+fn5+QAAAADz8/Pz8/Pz8/Pz8/Pz8/Pz8/Pz8/Pz8/Pz8/Pz8/Pz8/Pz8/Pz8/Pz8/Pz8/Pz8/Pz8/Pz8/Pz8/Pz8/Pz8/Pz8/Pz8/Pz8/Pz8/Pz8/Pz8/Pz8/Pz8/Pz8/Pz8/Pz8/Pz8/Pz8/Pz8/Pz8/Pz8/Pz8/Pz8/Pz8/Pz8/Pz8/P8AAACH5BAEAAP8ALAAAAAAgACAAAAiGAP8JHEiwoMGDCBMqXMiwocOHECNKnEixosWLGDNq3Mixo8ePIEOKHEmypMmTKFOqXMmypcuXMGPKnEmzps2bOHPq3Mqzp8+fQIMKHUq0qNGjSJMqXcq0qdOnUKNKnUq1qtWrWLNq3cq1q9evYMOKHUu2rNmzaNOqXcu2rdu3cOPKnUu3rt27ePPqhQQAOw==
+"""
+            
+            # Create a temporary file for the icon data
+            with tempfile.NamedTemporaryFile(mode='wb', suffix='.gif', delete=False) as f:
+                f.write(base64.b64decode(icon_data))
+                temp_icon_path = f.name
+            
+            try:
+                # Load the temporary icon
+                icon_image = tk.PhotoImage(file=temp_icon_path)
+                self.root.iconphoto(True, icon_image)
+                self.app_icon = icon_image
+                self.logger.info("Built-in application icon created")
+            finally:
+                # Clean up temporary file
+                try:
+                    os.unlink(temp_icon_path)
+                except:
+                    pass
+                    
+        except Exception as e:
+            self.logger.warning(f"Could not create built-in icon: {e}")
         
     def initialize_babeldoc(self):
         """Initialize BabelDOC components"""
@@ -271,6 +461,8 @@ class PDFTranslatorGUI(DragDropMixin):
         # Help menu
         help_menu = tk.Menu(menubar, tearoff=0)
         menubar.add_cascade(label="Help", menu=help_menu)
+        help_menu.add_command(label="Install Drag & Drop Support", command=self.install_drag_drop_support)
+        help_menu.add_separator()
         help_menu.add_command(label="About", command=self.show_about)
     
     def save_configuration(self):
@@ -581,7 +773,7 @@ A Python GUI application for translating PDF files using:
 Features:
 • BabelDOC-compatible TOML configuration format
 • Automatic configuration saving/loading
-• Drag and drop PDF file support
+• Drag and drop PDF file support (with ARM macOS support)
 • Dual-language and Chinese-only output
 • Cross-platform compatibility
 • OpenAI API key support for various LLM services
@@ -594,9 +786,67 @@ babeldoc --config ~/.pdf_translator_config.toml
 
 Input PDF files are never saved in the configuration for privacy.
 
+Drag and Drop Support:
+For best drag and drop experience on macOS ARM (M1/M2), install:
+pip install tkinterdnd2
+
 © 2025 - PDF Translation GUI"""
         
         messagebox.showinfo("About PDF Translator", about_text)
+    
+    def install_drag_drop_support(self):
+        """Show instructions for installing drag and drop support"""
+        install_text = """Drag and Drop Support Installation
+
+For the best drag and drop experience, especially on macOS ARM (M1/M2), 
+please install the tkinterdnd2 package:
+
+1. Open Terminal/Command Prompt
+2. Activate your conda environment:
+   conda activate pdf
+3. Install tkinterdnd2:
+   pip install tkinterdnd2
+4. Restart this application
+
+This will enable native drag and drop support with better reliability
+and visual feedback.
+
+Current status: Using fallback method (click to select files)"""
+        
+        result = messagebox.askyesnocancel(
+            "Install Drag & Drop Support", 
+            install_text + "\n\nWould you like to attempt automatic installation now?",
+            default="yes"
+        )
+        
+        if result:  # Yes - attempt installation
+            try:
+                import subprocess
+                import sys
+                
+                self.log_message("Attempting to install tkinterdnd2...")
+                result = subprocess.run([sys.executable, "-m", "pip", "install", "tkinterdnd2"], 
+                                      capture_output=True, text=True, timeout=60)
+                
+                if result.returncode == 0:
+                    self.log_message("✓ tkinterdnd2 installed successfully!")
+                    messagebox.showinfo("Installation Successful", 
+                                      "tkinterdnd2 has been installed successfully!\n\n"
+                                      "Please restart the application to enable drag and drop.")
+                else:
+                    self.log_message(f"✗ Installation failed: {result.stderr}")
+                    messagebox.showerror("Installation Failed", 
+                                       f"Failed to install tkinterdnd2:\n\n{result.stderr}\n\n"
+                                       "Please install manually using: pip install tkinterdnd2")
+                    
+            except subprocess.TimeoutExpired:
+                messagebox.showerror("Installation Timeout", 
+                                   "Installation timed out. Please install manually using:\n"
+                                   "pip install tkinterdnd2")
+            except Exception as e:
+                messagebox.showerror("Installation Error", 
+                                   f"Error during installation: {e}\n\n"
+                                   "Please install manually using: pip install tkinterdnd2")
     
     def toggle_api_key_visibility(self):
         """Toggle visibility of the API key field"""
@@ -657,12 +907,32 @@ Input PDF files are never saved in the configuration for privacy.
         try:
             self.enable_drag_drop(drop_frame, self.handle_dropped_files)
             self.enable_drag_drop(self.drop_label, self.handle_dropped_files)
-            self.logger.info("Drag and drop enabled")
+            
+            if self.drag_drop_enabled:
+                if self.drag_drop_method == "tkinterdnd2":
+                    self.drop_label.configure(text="📄 Drag and drop PDF files here\n"
+                                                  "✅ Native drag & drop enabled (tkinterdnd2)\n"
+                                                  "Supports multiple files and cross-platform drag & drop")
+                elif self.drag_drop_method == "builtin":
+                    self.drop_label.configure(text="📄 Drag and drop PDF files here\n"
+                                                  "⚠️ Experimental drag & drop (built-in)\n"
+                                                  "Use button above for better reliability")
+                elif self.drag_drop_method == "fallback":
+                    self.drop_label.configure(text="📄 Click here to select PDF files\n"
+                                                  "⚠️ Drag & drop not available - using click fallback\n"
+                                                  "Click this area or use the button above\n"
+                                                  "💡 Install tkinterdnd2 for native drag & drop",
+                                             cursor="hand2")  # Change cursor to indicate clickable
+                self.logger.info(f"Drag and drop enabled using method: {self.drag_drop_method}")
+            else:
+                self.drop_label.configure(text="📄 Use the 'Select PDF Files' button above\n"
+                                              "(Drag and drop not available on this system)")
+                
         except Exception as e:
             self.logger.warning(f"Could not enable drag and drop: {e}")
             # Update label to indicate drag and drop is not available
             self.drop_label.configure(text="📄 Use the 'Select PDF Files' button above\n"
-                                          "(Drag and drop not available on this system)")
+                                          f"(Drag and drop not available: {e})")
         
         # Store the frames for later access
         self.file_frame = file_frame
