@@ -78,6 +78,7 @@ jobs:
     steps:
       - name: Check if platform should be built
         id: should_build
+        shell: bash
         run: |
           # For tag pushes, build all platforms
           if [ "${{ github.event_name }}" = "push" ]; then
@@ -133,6 +134,7 @@ jobs:
 
       - name: Activate virtual environment (Unix)
         if: steps.should_build.outputs.build == 'true' && matrix.os != 'windows-latest'
+        shell: bash
         run: |
           source venv/bin/activate
           echo "VIRTUAL_ENV=${{ github.workspace }}/venv" >> $GITHUB_ENV
@@ -310,6 +312,7 @@ jobs:
 
       - name: Build executable with PyInstaller
         if: steps.should_build.outputs.build == 'true'
+        shell: bash
         run: |
           # Set up virtual display for Ubuntu (headless GUI compilation)
           if [ "${{ matrix.os }}" = "ubuntu-latest" ]; then
@@ -328,6 +331,7 @@ jobs:
 
       - name: Verify build
         if: steps.should_build.outputs.build == 'true'
+        shell: bash
         run: |
           ls -la dist/
           if [ "${{ matrix.os }}" = "windows-latest" ]; then
@@ -339,6 +343,7 @@ jobs:
       - name: Test executable (basic smoke test)
         if: steps.should_build.outputs.build == 'true'
         continue-on-error: true
+        shell: bash
         run: |
           # Basic smoke test - just try to import and check if executable responds
           if [ "${{ matrix.os }}" = "ubuntu-latest" ]; then
@@ -356,6 +361,7 @@ jobs:
       - name: Create archive name
         if: steps.should_build.outputs.build == 'true'
         id: archive_name
+        shell: bash
         run: |
           if [ "${{ github.event_name }}" = "push" ]; then
             # For releases, use the tag name
@@ -378,6 +384,7 @@ jobs:
 
       - name: Create archive (Unix)
         if: steps.should_build.outputs.build == 'true' && matrix.os != 'windows-latest'
+        shell: bash
         run: |
           cd dist
           tar -czf "../${{ steps.archive_name.outputs.ARCHIVE_NAME }}${{ matrix.archive_extension }}" pdf-translator-gui${{ matrix.binary_extension }}
