@@ -34,6 +34,16 @@ jobs:
       upload_url: ${{ steps.create_release.outputs.upload_url }}
       release_id: ${{ steps.create_release.outputs.id }}
     steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Get version
+        id: get_version
+        run: |
+          VERSION=$(python -c "exec(open('src/_version.py').read()); print(__version__)")
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Found version: $VERSION"
+
       - name: Create Release
         id: create_release
         uses: actions/create-release@v1
@@ -41,7 +51,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           tag_name: ${{ github.ref_name || format('manual-{0}', github.run_number) }}
-          release_name: Release ${{ github.ref_name || format('Manual Build {0}', github.run_number) }}
+          release_name: ${{ github.event.repository.name }}-${{ steps.get_version.outputs.version }}
           draft: false
           prerelease: ${{ github.event_name == 'workflow_dispatch' }}
 
