@@ -180,6 +180,27 @@ EOF
 # Make launcher script executable
 chmod +x "$MACOS_DIR/pdf-translator"
 
+# Sign the app to avoid security warnings
+echo "Signing the app bundle..."
+if codesign --force --deep --sign - "$APP_DIR" 2>/dev/null; then
+    echo "✅ App signed successfully!"
+else
+    echo "⚠️  Could not sign app - you may see security warnings when running"
+fi
+
+# Remove quarantine and set trusted attributes
+echo "Configuring app trust settings..."
+xattr -dr com.apple.quarantine "$APP_DIR" 2>/dev/null || true
+xattr -w com.apple.metadata:kMDItemWhereFroms '()' "$APP_DIR" 2>/dev/null || true
+
+# Try to add to Gatekeeper allow list (may require admin privileges)
+echo "Adding to system trust list..."
+if spctl --add "$APP_DIR" 2>/dev/null; then
+    echo "✅ App added to Gatekeeper allow list"
+else
+    echo "ℹ️  Could not add to Gatekeeper (may require admin privileges)"
+fi
+
 echo "✅ macOS App Bundle created successfully!"
 echo ""
 echo "📱 App Bundle: $APP_DIR"
@@ -191,3 +212,5 @@ echo "   • It will appear with the custom icon"
 echo ""
 echo "📝 Note: The app will work as long as it's in the same directory as the project files."
 echo "      If you move the .app file, also move the entire project folder."
+echo ""
+echo "🔒 Security: The app has been self-signed to reduce security warnings."
