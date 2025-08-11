@@ -16,4 +16,5 @@ requests>=2.31.0
 # torchvision
 
 # Additional dependencies that might be needed
-pathlib2>=2.3.7 ; python_version < '3.4'
+pathlib2>=2.3.7 ; python_version >= '3.12'
+babeldoc
