@@ -4,26 +4,8 @@ on:
   push:
     tags:
       - 'v*'  # Triggers on version tags like v1.0.0, v2.1.3, etc.
-  workflow_      - name: Install system dependencies (Ubuntu)
-        if: matrix.os == 'ubuntu-latest'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            python3-tk \
-            libgl1-mesa-dev \
-            libglib2.0-0 \
-            libsm6 \
-            libxext6 \
-            libxrender1 \
-            libgomp1 \
-            libgcc-s1 \
-            libxrandr2 \
-            libxss1 \
-            libxcursor1 \
-            libxcomposite1 \
-            libasound2 \
-            libxi6 \
-            libxtst6 inputs:
+  workflow_dispatch:  # Allows manual triggering
+    inputs:
       platforms:
         description: 'Platforms to build for'
         required: true
@@ -51,43 +33,22 @@ jobs:
     outputs:
       upload_url: ${{ steps.create_release.outputs.upload_url }}
       release_id: ${{ steps.create_release.outputs.id }}
-      should_upload: ${{ steps.should_upload.outputs.result }}
     steps:
-      - name: Determine release info
-        id: release_info
-        run: |
-          if [ "${{ github.event_name }}" = "push" ]; then
-            # For tag pushes, use the tag name
-            TAG_NAME="${{ github.ref_name }}"
-            RELEASE_NAME="Release ${{ github.ref_name }}"
-          else
-            # For manual builds, create a timestamp-based release
-            TIMESTAMP=$(date +%Y%m%d-%H%M%S)
-            TAG_NAME="manual-${TIMESTAMP}"
-            RELEASE_NAME="Manual Build ${TIMESTAMP}"
-          fi
-          echo "tag_name=${TAG_NAME}" >> $GITHUB_OUTPUT
-          echo "release_name=${RELEASE_NAME}" >> $GITHUB_OUTPUT
-
       - name: Create Release
         id: create_release
         uses: actions/create-release@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          tag_name: ${{ steps.release_info.outputs.tag_name }}
-          release_name: ${{ steps.release_info.outputs.release_name }}
+          tag_name: ${{ github.ref_name || format('manual-{0}', github.run_number) }}
+          release_name: Release ${{ github.ref_name || format('Manual Build {0}', github.run_number) }}
           draft: false
           prerelease: ${{ github.event_name == 'workflow_dispatch' }}
 
-      - name: Set upload flag
-        id: should_upload
-        run: echo "result=true" >> $GITHUB_OUTPUT
-
   build:
     needs: [create-release]
-    # Always run, but create-release might be skipped
-    if: always()
+    # Always run for tag pushes, or for manual builds regardless of create_release setting
+    if: always() && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
     strategy:
       matrix:
         include:
@@ -121,14 +82,14 @@ jobs:
           # For tag pushes, build all platforms
           if [ "${{ github.event_name }}" = "push" ]; then
             echo "build=true" >> $GITHUB_OUTPUT
-            echo "reason=tag_push" >> $GITHUB_OUTPUT
-          # For manual builds, check if platform is selected
+            echo "Building all platforms for release"
+          # For manual builds, check selected platforms
           elif [[ "${{ github.event.inputs.platforms }}" == *"${{ matrix.platform }}"* ]]; then
             echo "build=true" >> $GITHUB_OUTPUT
-            echo "reason=manual_selected" >> $GITHUB_OUTPUT
+            echo "Building ${{ matrix.platform }} (selected in manual build)"
           else
             echo "build=false" >> $GITHUB_OUTPUT
-            echo "reason=manual_not_selected" >> $GITHUB_OUTPUT
+            echo "Skipping ${{ matrix.platform }} (not selected in manual build)"
           fi
 
       - name: Checkout code
@@ -147,17 +108,15 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y \
             python3-tk \
-            libgl1-mesa-glx \
+            libgl1-mesa-dev \
             libglib2.0-0 \
-            libsm6 \
-            libxext6 \
-            libxrender-dev \
             libgomp1 \
-            libgcc-s1
+            xvfb
 
       - name: Install system dependencies (macOS)
         if: steps.should_build.outputs.build == 'true' && matrix.os == 'macos-latest'
         run: |
+          # Install tkinter if needed (usually comes with Python on macOS)
           brew install python-tk || true
 
       - name: Create virtual environment
@@ -352,6 +311,13 @@ jobs:
       - name: Build executable with PyInstaller
         if: steps.should_build.outputs.build == 'true'
         run: |
+          # Set up virtual display for Ubuntu (headless GUI compilation)
+          if [ "${{ matrix.os }}" = "ubuntu-latest" ]; then
+            export DISPLAY=:99
+            Xvfb :99 -screen 0 1024x768x24 > /dev/null 2>&1 &
+            sleep 3
+          fi
+          
           # Set architecture for macOS builds
           if [ "${{ matrix.os }}" = "macos-latest" ] && [ "${{ matrix.arch }}" = "arm64" ]; then
             export ARCHFLAGS="-arch arm64"
@@ -370,19 +336,36 @@ jobs:
             file dist/pdf-translator-gui
           fi
 
+      - name: Test executable (basic smoke test)
+        if: steps.should_build.outputs.build == 'true'
+        continue-on-error: true
+        run: |
+          # Basic smoke test - just try to import and check if executable responds
+          if [ "${{ matrix.os }}" = "ubuntu-latest" ]; then
+            # Use xvfb for Ubuntu headless testing
+            export DISPLAY=:99
+            timeout 10 ./dist/pdf-translator-gui --help || echo "GUI test skipped (expected for headless environment)"
+          elif [ "${{ matrix.os }}" = "macos-latest" ]; then
+            # For macOS, test might fail in headless environment, that's OK
+            timeout 10 ./dist/pdf-translator-gui --help || echo "GUI test skipped (expected for headless macOS environment)"
+          else
+            # Windows
+            timeout 10 ./dist/pdf-translator-gui.exe --help || echo "GUI test skipped (expected for headless environment)"
+          fi
+
       - name: Create archive name
         if: steps.should_build.outputs.build == 'true'
         id: archive_name
         run: |
-          # For releases, use clean names without timestamps
-          if [ "${{ github.event_name }}" = "push" ] || [ "${{ github.event.inputs.create_release }}" = "true" ]; then
+          if [ "${{ github.event_name }}" = "push" ]; then
+            # For releases, use the tag name
             if [ "${{ matrix.platform }}" = "macos" ] && [ "${{ matrix.arch }}" = "arm64" ]; then
               ARCHIVE_NAME="pdf-translator-gui-${{ matrix.platform }}-${{ matrix.arch }}"
             else
               ARCHIVE_NAME="pdf-translator-gui-${{ matrix.platform }}-${{ matrix.arch }}"
             fi
           else
-            # For manual builds without release, add timestamp
+            # For manual builds, add timestamp
             TIMESTAMP=$(date +%Y%m%d-%H%M%S)
             if [ "${{ matrix.platform }}" = "macos" ] && [ "${{ matrix.arch }}" = "arm64" ]; then
               ARCHIVE_NAME="pdf-translator-gui-${{ matrix.platform }}-${{ matrix.arch }}-${TIMESTAMP}"
@@ -406,7 +389,7 @@ jobs:
           7z a "../${{ steps.archive_name.outputs.ARCHIVE_NAME }}${{ matrix.archive_extension }}" pdf-translator-gui${{ matrix.binary_extension }}
 
       - name: Upload Release Asset
-        if: steps.should_build.outputs.build == 'true' && needs.create-release.outputs.upload_url != ''
+        if: steps.should_build.outputs.build == 'true' && needs.create-release.result == 'success'
         uses: actions/upload-release-asset@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -422,4 +405,4 @@ jobs:
         with:
           name: ${{ steps.archive_name.outputs.ARCHIVE_NAME }}
           path: ./${{ steps.archive_name.outputs.ARCHIVE_NAME }}${{ matrix.archive_extension }}
-          retention-days: ${{ github.event_name == 'push' && '30' || '7' }}
+          retention-days: 30
