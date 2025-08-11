@@ -107,6 +107,10 @@ jobs:
           TAG_NAME="${{ steps.bump_version.outputs.tag_name }}"
           VERSION="${{ steps.bump_version.outputs.new_version }}"
           
+          # Configure git user (needed for tag creation)
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          
           echo "Creating tag: $TAG_NAME"
           git tag -a "$TAG_NAME" -m "Release $VERSION"
           git push origin "$TAG_NAME"
