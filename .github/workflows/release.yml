@@ -1,0 +1,322 @@
+name: Build and Release
+
+on:
+  push:
+    tags:
+      - 'v*'  # Triggers on version tags like v1.0.0, v2.1.3, etc.
+  workflow_dispatch:  # Allows manual triggering
+
+jobs:
+  create-release:
+    runs-on: ubuntu-latest
+    outputs:
+      upload_url: ${{ steps.create_release.outputs.upload_url }}
+      release_id: ${{ steps.create_release.outputs.id }}
+    steps:
+      - name: Create Release
+        id: create_release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ github.ref_name }}
+          release_name: Release ${{ github.ref_name }}
+          draft: false
+          prerelease: false
+
+  build:
+    needs: create-release
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            platform: linux
+            arch: x64
+            binary_extension: ""
+            archive_extension: ".tar.gz"
+          - os: windows-latest
+            platform: windows
+            arch: x64
+            binary_extension: ".exe"
+            archive_extension: ".zip"
+          - os: macos-latest
+            platform: macos
+            arch: x64
+            binary_extension: ""
+            archive_extension: ".tar.gz"
+          - os: macos-latest
+            platform: macos
+            arch: arm64
+            binary_extension: ""
+            archive_extension: ".tar.gz"
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: Install system dependencies (Ubuntu)
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            python3-tk \
+            libgl1-mesa-glx \
+            libglib2.0-0 \
+            libsm6 \
+            libxext6 \
+            libxrender-dev \
+            libgomp1 \
+            libgcc-s1
+
+      - name: Install system dependencies (macOS)
+        if: matrix.os == 'macos-latest'
+        run: |
+          # Install tkinter if needed (usually comes with Python on macOS)
+          brew install python-tk || true
+
+      - name: Create virtual environment
+        run: |
+          python -m venv venv
+          
+      - name: Activate virtual environment (Windows)
+        if: matrix.os == 'windows-latest'
+        run: |
+          venv\Scripts\activate
+          echo "VIRTUAL_ENV=${{ github.workspace }}\venv" >> $GITHUB_ENV
+          echo "${{ github.workspace }}\venv\Scripts" >> $GITHUB_PATH
+
+      - name: Activate virtual environment (Unix)
+        if: matrix.os != 'windows-latest'
+        run: |
+          source venv/bin/activate
+          echo "VIRTUAL_ENV=${{ github.workspace }}/venv" >> $GITHUB_ENV
+          echo "${{ github.workspace }}/venv/bin" >> $GITHUB_PATH
+
+      - name: Upgrade pip and install build tools
+        run: |
+          python -m pip install --upgrade pip
+          pip install wheel setuptools
+
+      - name: Install PyInstaller
+        run: |
+          pip install pyinstaller==6.3.0
+
+      - name: Install basic requirements
+        run: |
+          pip install requests>=2.31.0
+          pip install Pillow>=9.0.0
+          pip install numpy>=1.21.0
+
+      - name: Install babeldoc dependencies
+        run: |
+          # Install core dependencies that BabelDOC might need
+          pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
+          pip install transformers>=4.20.0
+          pip install opencv-python-headless>=4.5.0
+          pip install pymupdf>=1.20.0
+          
+      - name: Try to install babeldoc (if available)
+        continue-on-error: true
+        run: |
+          # Try to install babeldoc - this might fail if not publicly available
+          pip install babeldoc || echo "babeldoc not available, continuing with stub implementation"
+
+      - name: Create stub babeldoc module (fallback)
+        run: |
+          python -c "
+          import os
+          import sys
+          
+          # Create stub babeldoc modules for compilation
+          stub_dir = 'babeldoc_stub'
+          os.makedirs(f'{stub_dir}/babeldoc/format/pdf', exist_ok=True)
+          os.makedirs(f'{stub_dir}/babeldoc/translator', exist_ok=True)
+          os.makedirs(f'{stub_dir}/babeldoc/docvision', exist_ok=True)
+          
+          # Create __init__.py files
+          init_files = [
+              f'{stub_dir}/babeldoc/__init__.py',
+              f'{stub_dir}/babeldoc/format/__init__.py',
+              f'{stub_dir}/babeldoc/format/pdf/__init__.py',
+              f'{stub_dir}/babeldoc/translator/__init__.py',
+              f'{stub_dir}/babeldoc/docvision/__init__.py'
+          ]
+          
+          for init_file in init_files:
+              with open(init_file, 'w') as f:
+                  f.write('# Stub module\n')
+          
+          # Create stub modules
+          with open(f'{stub_dir}/babeldoc/format/pdf/high_level.py', 'w') as f:
+              f.write('''
+          def translate_pdf(*args, **kwargs):
+              raise ImportError(\"BabelDOC not available in this build\")
+          ''')
+          
+          with open(f'{stub_dir}/babeldoc/format/pdf/translation_config.py', 'w') as f:
+              f.write('''
+          class TranslationConfig:
+              def __init__(self, *args, **kwargs):
+                  raise ImportError(\"BabelDOC not available in this build\")
+          ''')
+          
+          with open(f'{stub_dir}/babeldoc/translator/translator.py', 'w') as f:
+              f.write('''
+          class OpenAITranslator:
+              def __init__(self, *args, **kwargs):
+                  raise ImportError(\"BabelDOC not available in this build\")
+          ''')
+          
+          with open(f'{stub_dir}/babeldoc/docvision/doclayout.py', 'w') as f:
+              f.write('''
+          class DocLayoutModel:
+              def __init__(self, *args, **kwargs):
+                  raise ImportError(\"BabelDOC not available in this build\")
+          ''')
+          
+          # Add to Python path
+          sys.path.insert(0, stub_dir)
+          print('Created stub babeldoc modules')
+          "
+
+      - name: Create PyInstaller spec file
+        run: |
+          python -c "
+          spec_content = '''
+          # -*- mode: python ; coding: utf-8 -*-
+          import sys
+          import os
+          
+          block_cipher = None
+          
+          # Add babeldoc stub to path if needed
+          if os.path.exists('babeldoc_stub'):
+              sys.path.insert(0, 'babeldoc_stub')
+          
+          a = Analysis(
+              ['src/main.py'],
+              pathex=[],
+              binaries=[],
+              datas=[],
+              hiddenimports=[
+                  'tkinter',
+                  'tkinter.ttk',
+                  'tkinter.filedialog',
+                  'tkinter.messagebox',
+                  'requests',
+                  'json',
+                  'pathlib',
+                  'urllib.parse',
+                  'threading',
+                  'asyncio',
+                  'logging',
+                  'platform',
+                  'tomllib',
+                  'tomli',
+                  'tomli_w',
+              ],
+              hookspath=[],
+              hooksconfig={},
+              runtime_hooks=[],
+              excludes=[],
+              win_no_prefer_redirects=False,
+              win_private_assemblies=False,
+              cipher=block_cipher,
+              noarchive=False,
+          )
+          
+          pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
+          
+          exe = EXE(
+              pyz,
+              a.scripts,
+              a.binaries,
+              a.zipfiles,
+              a.datas,
+              [],
+              name='pdf-translator-gui',
+              debug=False,
+              bootloader_ignore_signals=False,
+              strip=False,
+              upx=True,
+              upx_exclude=[],
+              runtime_tmpdir=None,
+              console=False,  # Set to False for GUI app
+              disable_windowed_traceback=False,
+              argv_emulation=False,
+              target_arch=None,
+              codesign_identity=None,
+              entitlements_file=None,
+              icon=None,  # Add icon file path here if you have one
+          )
+          '''
+          
+          with open('pdf-translator.spec', 'w') as f:
+              f.write(spec_content)
+          "
+
+      - name: Build executable with PyInstaller
+        run: |
+          # Set architecture for macOS builds
+          if [ "${{ matrix.os }}" = "macos-latest" ] && [ "${{ matrix.arch }}" = "arm64" ]; then
+            export ARCHFLAGS="-arch arm64"
+            pyinstaller --target-arch arm64 pdf-translator.spec
+          else
+            pyinstaller pdf-translator.spec
+          fi
+
+      - name: Verify build
+        run: |
+          ls -la dist/
+          if [ "${{ matrix.os }}" = "windows-latest" ]; then
+            file dist/pdf-translator-gui.exe
+          else
+            file dist/pdf-translator-gui
+          fi
+
+      - name: Create archive name
+        id: archive_name
+        run: |
+          if [ "${{ matrix.platform }}" = "macos" ] && [ "${{ matrix.arch }}" = "arm64" ]; then
+            ARCHIVE_NAME="pdf-translator-gui-${{ matrix.platform }}-${{ matrix.arch }}"
+          else
+            ARCHIVE_NAME="pdf-translator-gui-${{ matrix.platform }}-${{ matrix.arch }}"
+          fi
+          echo "ARCHIVE_NAME=$ARCHIVE_NAME" >> $GITHUB_OUTPUT
+          echo "Archive name: $ARCHIVE_NAME"
+
+      - name: Create archive (Unix)
+        if: matrix.os != 'windows-latest'
+        run: |
+          cd dist
+          tar -czf "../${{ steps.archive_name.outputs.ARCHIVE_NAME }}${{ matrix.archive_extension }}" pdf-translator-gui${{ matrix.binary_extension }}
+
+      - name: Create archive (Windows)
+        if: matrix.os == 'windows-latest'
+        run: |
+          cd dist
+          7z a "../${{ steps.archive_name.outputs.ARCHIVE_NAME }}${{ matrix.archive_extension }}" pdf-translator-gui${{ matrix.binary_extension }}
+
+      - name: Upload Release Asset
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ needs.create-release.outputs.upload_url }}
+          asset_path: ./${{ steps.archive_name.outputs.ARCHIVE_NAME }}${{ matrix.archive_extension }}
+          asset_name: ${{ steps.archive_name.outputs.ARCHIVE_NAME }}${{ matrix.archive_extension }}
+          asset_content_type: application/octet-stream
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.archive_name.outputs.ARCHIVE_NAME }}
+          path: ./${{ steps.archive_name.outputs.ARCHIVE_NAME }}${{ matrix.archive_extension }}
+          retention-days: 30

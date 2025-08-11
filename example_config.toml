@@ -1,0 +1,46 @@
+[babeldoc]
+# Basic settings
+debug = false
+lang-in = "en"
+lang-out = "zh"
+qps = 2
+output = "/Users/username/Documents/translated_pdfs"
+
+# PDF processing options
+split-short-lines = false
+short-line-split-factor = 0.8
+skip-clean = false
+dual-translate-first = false
+disable-rich-text-translate = false
+use-alternating-pages-dual = false
+watermark-output-mode = "no_watermark"
+max-pages-per-part = 50
+only_include_translated_page = false
+skip-scanned-detection = false
+auto_extract_glossary = true
+formular_font_pattern = ""
+formular_char_pattern = ""
+show_char_box = false
+ocr_workaround = false
+rpc_doclayout = ""
+working_dir = ""
+auto_enable_ocr_workaround = false
+
+# Translation service
+openai = true
+openai-model = "qwen2.5:14b"
+openai-base-url = "http://localhost:11434/v1"
+openai-api-key = "ollama"
+pool-max-workers = 4
+
+# Output control
+no-dual = false
+no-mono = false
+min-text-length = 5
+report-interval = 0.5
+
+# GUI-specific settings (not used by BabelDOC CLI)
+# These are custom settings for the GUI application
+[gui]
+window_geometry = "800x700+100+100"
+show_api_key = false
