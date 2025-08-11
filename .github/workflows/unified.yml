@@ -62,11 +62,6 @@ jobs:
             arch: x64
             binary_extension: ".exe"
             archive_extension: ".zip"
-          - os: macos-13
-            platform: macos
-            arch: x64
-            binary_extension: ""
-            archive_extension: ".tar.gz"
           - os: macos-latest
             platform: macos
             arch: arm64
@@ -115,7 +110,7 @@ jobs:
             xvfb
 
       - name: Install system dependencies (macOS)
-        if: steps.should_build.outputs.build == 'true' && matrix.os == 'macos-latest'
+        if: steps.should_build.outputs.build == 'true' && matrix.platform == 'macos'
         run: |
           # Install tkinter if needed (usually comes with Python on macOS)
           brew install python-tk || true
@@ -176,6 +171,7 @@ jobs:
 
       - name: Create stub babeldoc module (fallback)
         if: steps.should_build.outputs.build == 'true'
+        shell: bash
         run: |
           python -c "
           import os
@@ -198,35 +194,20 @@ jobs:
           
           for init_file in init_files:
               with open(init_file, 'w') as f:
-                  f.write('# Stub module\n')
+                  f.write('# Stub module\\n')
           
           # Create stub modules
           with open(f'{stub_dir}/babeldoc/format/pdf/high_level.py', 'w') as f:
-              f.write('''
-          def translate_pdf(*args, **kwargs):
-              raise ImportError(\"BabelDOC not available in this build\")
-          ''')
+              f.write('def translate_pdf(*args, **kwargs):\\n    raise ImportError(\"BabelDOC not available in this build\")\\n')
           
           with open(f'{stub_dir}/babeldoc/format/pdf/translation_config.py', 'w') as f:
-              f.write('''
-          class TranslationConfig:
-              def __init__(self, *args, **kwargs):
-                  raise ImportError(\"BabelDOC not available in this build\")
-          ''')
+              f.write('class TranslationConfig:\\n    def __init__(self, *args, **kwargs):\\n        raise ImportError(\"BabelDOC not available in this build\")\\n')
           
           with open(f'{stub_dir}/babeldoc/translator/translator.py', 'w') as f:
-              f.write('''
-          class OpenAITranslator:
-              def __init__(self, *args, **kwargs):
-                  raise ImportError(\"BabelDOC not available in this build\")
-          ''')
+              f.write('class OpenAITranslator:\\n    def __init__(self, *args, **kwargs):\\n        raise ImportError(\"BabelDOC not available in this build\")\\n')
           
           with open(f'{stub_dir}/babeldoc/docvision/doclayout.py', 'w') as f:
-              f.write('''
-          class DocLayoutModel:
-              def __init__(self, *args, **kwargs):
-                  raise ImportError(\"BabelDOC not available in this build\")
-          ''')
+              f.write('class DocLayoutModel:\\n    def __init__(self, *args, **kwargs):\\n        raise ImportError(\"BabelDOC not available in this build\")\\n')
           
           # Add to Python path
           sys.path.insert(0, stub_dir)
@@ -241,9 +222,7 @@ jobs:
           
           # Determine target architecture for macOS
           target_arch = None
-          if '${{ matrix.os }}' == 'macos-13' and '${{ matrix.arch }}' == 'x64':
-              target_arch = 'x86_64'
-          elif '${{ matrix.os }}' == 'macos-latest' and '${{ matrix.arch }}' == 'arm64':
+          if '${{ matrix.os }}' == 'macos-latest' and '${{ matrix.arch }}' == 'arm64':
               target_arch = 'arm64'
           
           spec_content = '''
@@ -331,9 +310,7 @@ jobs:
           fi
           
           # Set architecture environment for macOS builds (for dependencies)
-          if [ "${{ matrix.os }}" = "macos-13" ] && [ "${{ matrix.arch }}" = "x64" ]; then
-            export ARCHFLAGS="-arch x86_64"
-          elif [ "${{ matrix.os }}" = "macos-latest" ] && [ "${{ matrix.arch }}" = "arm64" ]; then
+          if [ "${{ matrix.os }}" = "macos-latest" ] && [ "${{ matrix.arch }}" = "arm64" ]; then
             export ARCHFLAGS="-arch arm64"
           fi
           
