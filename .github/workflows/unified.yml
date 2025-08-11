@@ -62,7 +62,7 @@ jobs:
             arch: x64
             binary_extension: ".exe"
             archive_extension: ".zip"
-          - os: macos-latest
+          - os: macos-13
             platform: macos
             arch: x64
             binary_extension: ""
@@ -237,6 +237,15 @@ jobs:
         if: steps.should_build.outputs.build == 'true'
         run: |
           python -c "
+          import os
+          
+          # Determine target architecture for macOS
+          target_arch = None
+          if '${{ matrix.os }}' == 'macos-13' and '${{ matrix.arch }}' == 'x64':
+              target_arch = 'x86_64'
+          elif '${{ matrix.os }}' == 'macos-latest' and '${{ matrix.arch }}' == 'arm64':
+              target_arch = 'arm64'
+          
           spec_content = '''
           # -*- mode: python ; coding: utf-8 -*-
           import sys
@@ -299,7 +308,7 @@ jobs:
               console=False,  # Set to False for GUI app
               disable_windowed_traceback=False,
               argv_emulation=False,
-              target_arch=None,
+              target_arch=''' + repr(target_arch) + ''',
               codesign_identity=None,
               entitlements_file=None,
               icon=None,  # Add icon file path here if you have one
@@ -321,13 +330,15 @@ jobs:
             sleep 3
           fi
           
-          # Set architecture for macOS builds
-          if [ "${{ matrix.os }}" = "macos-latest" ] && [ "${{ matrix.arch }}" = "arm64" ]; then
+          # Set architecture environment for macOS builds (for dependencies)
+          if [ "${{ matrix.os }}" = "macos-13" ] && [ "${{ matrix.arch }}" = "x64" ]; then
+            export ARCHFLAGS="-arch x86_64"
+          elif [ "${{ matrix.os }}" = "macos-latest" ] && [ "${{ matrix.arch }}" = "arm64" ]; then
             export ARCHFLAGS="-arch arm64"
-            pyinstaller --target-arch arm64 pdf-translator.spec
-          else
-            pyinstaller pdf-translator.spec
           fi
+          
+          # Build with PyInstaller using the spec file
+          pyinstaller pdf-translator.spec
 
       - name: Verify build
         if: steps.should_build.outputs.build == 'true'
