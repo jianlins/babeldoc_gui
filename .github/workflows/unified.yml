@@ -210,14 +210,14 @@ jobs:
         if: steps.should_build.outputs.build == 'true'
         uses: actions/setup-python@v4
         with:
-          python-version: '3.10'
+          python-version: '3.12'
 
       - name: Install system dependencies (Ubuntu)
         if: steps.should_build.outputs.build == 'true' && matrix.os == 'ubuntu-latest'
         run: |
           sudo apt-get update
           sudo apt-get install -y \
-            python3-tk \
+            python3.12-tk \
             libgl1-mesa-dev \
             libglib2.0-0 \
             libgomp1 \
@@ -228,8 +228,8 @@ jobs:
       - name: Install system dependencies (macOS)
         if: steps.should_build.outputs.build == 'true' && matrix.platform == 'macos'
         run: |
-          # Install tkinter if needed (usually comes with Python on macOS)
-          brew install python-tk || true
+          # Ensure Python 3.12 and tkinter are installed via Homebrew
+          brew install python@3.12 || true
           # Install UPX for better compression
           brew install upx || true
 
