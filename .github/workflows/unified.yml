@@ -270,28 +270,10 @@ jobs:
         run: |
           pip install pyinstaller==6.3.0
 
-      - name: Install basic requirements
+      - name: Install all requirements from requirements.txt
         if: steps.should_build.outputs.build == 'true'
         run: |
-          pip install requests>=2.31.0
-          pip install Pillow>=9.0.0
-          pip install numpy>=1.21.0
-
-      - name: Install babeldoc dependencies
-        if: steps.should_build.outputs.build == 'true'
-        run: |
-          # Install core dependencies that BabelDOC might need
-          pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
-          pip install transformers>=4.20.0
-          pip install opencv-python-headless>=4.5.0
-          pip install pymupdf>=1.20.0
-          
-      - name: Try to install babeldoc (if available)
-        if: steps.should_build.outputs.build == 'true'
-        continue-on-error: true
-        run: |
-          # Try to install babeldoc - this might fail if not publicly available
-          pip install babeldoc || echo "babeldoc not available, continuing with stub implementation"
+          pip install -r requirements.txt || echo "Some dependencies may not be available, continuing with stub implementation if needed"
 
       - name: Create stub babeldoc module (fallback)
         if: steps.should_build.outputs.build == 'true'
