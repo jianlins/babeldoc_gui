@@ -862,39 +862,45 @@ Current status: Using fallback method (click to select files)"""
         """Create and layout GUI widgets"""
         # Create menu bar
         self.create_menu_bar()
-        
-        # Main frame
-        main_frame = ttk.Frame(self.root, padding="10")
-        main_frame.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
-        
-        # Configure grid weights
+
+        # Tabbed interface
+        notebook = ttk.Notebook(self.root)
+        notebook.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
         self.root.columnconfigure(0, weight=1)
         self.root.rowconfigure(0, weight=1)
-        main_frame.columnconfigure(1, weight=1)
-        
+
+        # Tab 1: Input/Output configs and translation progress
+        tab1 = ttk.Frame(notebook, padding="10")
+        notebook.add(tab1, text="Translate")
+
+        # Tab 2: Other configurations
+        tab2 = ttk.Frame(notebook, padding="10")
+        notebook.add(tab2, text="Settings")
+
+        # Tab 1 layout
+        tab1.columnconfigure(1, weight=1)
+
         # Title
-        title_label = ttk.Label(main_frame, text="PDF Translator with BabelDOC + Ollama", 
-                               font=("Arial", 16, "bold"))
+        title_label = ttk.Label(tab1, text="PDF Translator with BabelDOC + Ollama", font=("Arial", 16, "bold"))
         title_label.grid(row=0, column=0, columnspan=3, pady=(0, 20))
-        
+
         # File selection section
-        file_frame = ttk.LabelFrame(main_frame, text="PDF Files Selection", padding="10")
+        file_frame = ttk.LabelFrame(tab1, text="PDF Files Selection", padding="10")
         file_frame.grid(row=1, column=0, columnspan=3, sticky=(tk.W, tk.E), pady=(0, 10))
         file_frame.columnconfigure(1, weight=1)
-        
-        ttk.Button(file_frame, text="Select PDF Files", 
-                  command=self.select_files).grid(row=0, column=0, padx=(0, 10))
-        
+
+        ttk.Button(file_frame, text="Select PDF Files", command=self.select_files).grid(row=0, column=0, padx=(0, 10))
+
         self.files_var = tk.StringVar(value="No files selected")
         files_label = ttk.Label(file_frame, textvariable=self.files_var, wraplength=600)
         files_label.grid(row=0, column=1, sticky=(tk.W, tk.E))
-        
+
         # Drag and drop area
         drop_frame = ttk.Frame(file_frame, relief="groove", borderwidth=2)
         drop_frame.grid(row=1, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(10, 0))
         drop_frame.columnconfigure(0, weight=1)
-        
-        self.drop_label = ttk.Label(drop_frame, 
+
+        self.drop_label = ttk.Label(drop_frame,
                                    text="📄 Drag and drop PDF files here\n"
                                         "or use the 'Select PDF Files' button above\n"
                                         "Supports multiple files and cross-platform drag & drop",
@@ -902,12 +908,12 @@ Current status: Using fallback method (click to select files)"""
                                    font=("Arial", 10),
                                    foreground="gray")
         self.drop_label.grid(row=0, column=0, pady=20, padx=20)
-        
+
         # Enable drag and drop on the drop area
         try:
             self.enable_drag_drop(drop_frame, self.handle_dropped_files)
             self.enable_drag_drop(self.drop_label, self.handle_dropped_files)
-            
+
             if self.drag_drop_enabled:
                 if self.drag_drop_method == "tkinterdnd2":
                     self.drop_label.configure(text="📄 Drag and drop PDF files here\n"
@@ -922,155 +928,135 @@ Current status: Using fallback method (click to select files)"""
                                                   "⚠️ Drag & drop not available - using click fallback\n"
                                                   "Click this area or use the button above\n"
                                                   "💡 Install tkinterdnd2 for native drag & drop",
-                                             cursor="hand2")  # Change cursor to indicate clickable
+                                             cursor="hand2")
                 self.logger.info(f"Drag and drop enabled using method: {self.drag_drop_method}")
             else:
                 self.drop_label.configure(text="📄 Use the 'Select PDF Files' button above\n"
                                               "(Drag and drop not available on this system)")
-                
+
         except Exception as e:
             self.logger.warning(f"Could not enable drag and drop: {e}")
-            # Update label to indicate drag and drop is not available
             self.drop_label.configure(text="📄 Use the 'Select PDF Files' button above\n"
                                           f"(Drag and drop not available: {e})")
-        
-        # Store the frames for later access
+
         self.file_frame = file_frame
         self.drop_frame = drop_frame
-        
+
         # Output directory section
-        output_frame = ttk.LabelFrame(main_frame, text="Output Directory", padding="10")
+        output_frame = ttk.LabelFrame(tab1, text="Output Directory", padding="10")
         output_frame.grid(row=2, column=0, columnspan=3, sticky=(tk.W, tk.E), pady=(0, 10))
         output_frame.columnconfigure(1, weight=1)
-        
-        ttk.Button(output_frame, text="Select Output Directory", 
-                  command=self.select_output_directory).grid(row=0, column=0, padx=(0, 10))
-        
+
+        ttk.Button(output_frame, text="Select Output Directory", command=self.select_output_directory).grid(row=0, column=0, padx=(0, 10))
+
         self.output_var = tk.StringVar(value="Current directory")
         output_label = ttk.Label(output_frame, textvariable=self.output_var, wraplength=600)
         output_label.grid(row=0, column=1, sticky=(tk.W, tk.E))
-        
+
         # Ollama configuration section
-        ollama_frame = ttk.LabelFrame(main_frame, text="Ollama Configuration", padding="10")
-        ollama_frame.grid(row=3, column=0, columnspan=3, sticky=(tk.W, tk.E), pady=(0, 10))
+        ollama_frame = ttk.LabelFrame(tab2, text="Ollama Configuration", padding="10")
+        ollama_frame.grid(row=1, column=0, columnspan=3, sticky=(tk.W, tk.E), pady=(0, 10))
         ollama_frame.columnconfigure(1, weight=1)
-        
-        # Ollama URL
+
         ttk.Label(ollama_frame, text="Ollama URL:").grid(row=0, column=0, sticky=tk.W, padx=(0, 10))
         self.ollama_url_var = tk.StringVar(value="http://localhost:11434")
         self.ollama_url_var.trace_add('write', lambda *args: self.auto_save_configuration())
         ollama_url_entry = ttk.Entry(ollama_frame, textvariable=self.ollama_url_var, width=50)
         ollama_url_entry.grid(row=0, column=1, sticky=(tk.W, tk.E), padx=(0, 10))
-        
-        ttk.Button(ollama_frame, text="Test Connection", 
-                  command=self.test_ollama_connection).grid(row=0, column=2)
-        
-        # Model selection
+
+        ttk.Button(ollama_frame, text="Test Connection", command=self.test_ollama_connection).grid(row=0, column=2)
+
         ttk.Label(ollama_frame, text="Model:").grid(row=1, column=0, sticky=tk.W, padx=(0, 10), pady=(10, 0))
         self.model_var = tk.StringVar(value="qwen2.5:14b")
         self.model_var.trace_add('write', lambda *args: self.auto_save_configuration())
         model_entry = ttk.Entry(ollama_frame, textvariable=self.model_var, width=50)
         model_entry.grid(row=1, column=1, sticky=(tk.W, tk.E), padx=(0, 10), pady=(10, 0))
-        
-        ttk.Button(ollama_frame, text="Refresh Models", 
-                  command=self.refresh_models).grid(row=1, column=2, pady=(10, 0))
-        
-        # API Key
+
+        ttk.Button(ollama_frame, text="Refresh Models", command=self.refresh_models).grid(row=1, column=2, pady=(10, 0))
+
         ttk.Label(ollama_frame, text="API Key:").grid(row=2, column=0, sticky=tk.W, padx=(0, 10), pady=(10, 0))
         self.api_key_var = tk.StringVar(value="ollama")
         self.api_key_var.trace_add('write', lambda *args: self.auto_save_configuration())
         self.api_key_entry = ttk.Entry(ollama_frame, textvariable=self.api_key_var, width=50, show="*")
         self.api_key_entry.grid(row=2, column=1, sticky=(tk.W, tk.E), padx=(0, 10), pady=(10, 0))
-        
-        # Show/Hide API key button
+
         self.show_api_key = False
-        self.toggle_api_key_button = ttk.Button(ollama_frame, text="Show", 
-                                               command=self.toggle_api_key_visibility, width=8)
+        self.toggle_api_key_button = ttk.Button(ollama_frame, text="Show", command=self.toggle_api_key_visibility, width=8)
         self.toggle_api_key_button.grid(row=2, column=2, pady=(10, 0))
-        
-        # Connection status
+
         self.connection_status_var = tk.StringVar(value="Not connected")
-        status_label = ttk.Label(ollama_frame, textvariable=self.connection_status_var, 
-                               foreground="red")
+        status_label = ttk.Label(ollama_frame, textvariable=self.connection_status_var, foreground="red")
         status_label.grid(row=3, column=0, columnspan=3, pady=(10, 0))
-        
+
         # Translation options section
-        options_frame = ttk.LabelFrame(main_frame, text="Translation Options", padding="10")
-        options_frame.grid(row=4, column=0, columnspan=3, sticky=(tk.W, tk.E), pady=(0, 10))
+        options_frame = ttk.LabelFrame(tab2, text="Translation Options", padding="10")
+        options_frame.grid(row=2, column=0, columnspan=3, sticky=(tk.W, tk.E), pady=(0, 10))
         options_frame.columnconfigure(1, weight=1)
-        
-        # Source and target languages
+
         ttk.Label(options_frame, text="Source Language:").grid(row=0, column=0, sticky=tk.W, padx=(0, 10))
         self.source_lang_var = tk.StringVar(value="en")
         self.source_lang_var.trace_add('write', lambda *args: self.auto_save_configuration())
-        source_lang_combo = ttk.Combobox(options_frame, textvariable=self.source_lang_var, 
-                                        values=["en", "fr", "de", "es", "ja", "ko"], width=10)
+        source_lang_combo = ttk.Combobox(options_frame, textvariable=self.source_lang_var, values=["en", "fr", "de", "es", "ja", "ko"], width=10)
         source_lang_combo.grid(row=0, column=1, sticky=tk.W, padx=(0, 20))
-        
+
         ttk.Label(options_frame, text="Target Language:").grid(row=0, column=2, sticky=tk.W, padx=(0, 10))
         self.target_lang_var = tk.StringVar(value="zh")
         self.target_lang_var.trace_add('write', lambda *args: self.auto_save_configuration())
-        target_lang_combo = ttk.Combobox(options_frame, textvariable=self.target_lang_var, 
-                                        values=["zh", "zh-CN", "zh-TW"], width=10)
+        target_lang_combo = ttk.Combobox(options_frame, textvariable=self.target_lang_var, values=["zh", "zh-CN", "zh-TW"], width=10)
         target_lang_combo.grid(row=0, column=3, sticky=tk.W)
-        
-        # QPS setting
+
         ttk.Label(options_frame, text="Translation Speed (QPS):").grid(row=1, column=0, sticky=tk.W, padx=(0, 10), pady=(10, 0))
         self.qps_var = tk.StringVar(value="2")
         self.qps_var.trace_add('write', lambda *args: self.auto_save_configuration())
         qps_spinbox = ttk.Spinbox(options_frame, from_=1, to=10, textvariable=self.qps_var, width=10)
         qps_spinbox.grid(row=1, column=1, sticky=tk.W, pady=(10, 0))
-        
-        # Output options
+
         self.dual_output_var = tk.BooleanVar(value=True)
         self.dual_output_var.trace_add('write', lambda *args: self.auto_save_configuration())
-        ttk.Checkbutton(options_frame, text="Generate dual-language PDF", 
-                       variable=self.dual_output_var).grid(row=2, column=0, columnspan=2, sticky=tk.W, pady=(10, 0))
-        
+        ttk.Checkbutton(options_frame, text="Generate dual-language PDF", variable=self.dual_output_var).grid(row=2, column=0, columnspan=2, sticky=tk.W, pady=(10, 0))
+
         self.mono_output_var = tk.BooleanVar(value=True)
         self.mono_output_var.trace_add('write', lambda *args: self.auto_save_configuration())
-        ttk.Checkbutton(options_frame, text="Generate Chinese-only PDF", 
-                       variable=self.mono_output_var).grid(row=2, column=2, columnspan=2, sticky=tk.W, pady=(10, 0))
-        
+        ttk.Checkbutton(options_frame, text="Generate Chinese-only PDF", variable=self.mono_output_var).grid(row=2, column=2, columnspan=2, sticky=tk.W, pady=(10, 0))
+
         # Translation section
-        translate_frame = ttk.LabelFrame(main_frame, text="Translation", padding="10")
+        translate_frame = ttk.LabelFrame(tab1, text="Translation", padding="10")
         translate_frame.grid(row=5, column=0, columnspan=3, sticky=(tk.W, tk.E), pady=(0, 10))
         translate_frame.columnconfigure(0, weight=1)
-        
-        self.translate_button = ttk.Button(translate_frame, text="Start Translation", 
-                                          command=self.start_translation)
+
+        self.translate_button = ttk.Button(translate_frame, text="Start Translation", command=self.start_translation)
         self.translate_button.grid(row=0, column=0, pady=(0, 10))
-        
-        # Progress bar
+
         self.progress_var = tk.DoubleVar()
-        self.progress_bar = ttk.Progressbar(translate_frame, variable=self.progress_var, 
-                                          maximum=100, length=600)
+        self.progress_bar = ttk.Progressbar(translate_frame, variable=self.progress_var, maximum=100, length=600)
         self.progress_bar.grid(row=1, column=0, sticky=(tk.W, tk.E), pady=(0, 10))
-        
-        # Status text
+
         self.status_var = tk.StringVar(value="Ready")
         status_label = ttk.Label(translate_frame, textvariable=self.status_var)
         status_label.grid(row=2, column=0)
-        
+
         # Log section
-        log_frame = ttk.LabelFrame(main_frame, text="Translation Log", padding="10")
+        log_frame = ttk.LabelFrame(tab1, text="Translation Log", padding="10")
         log_frame.grid(row=6, column=0, columnspan=3, sticky=(tk.W, tk.E, tk.N, tk.S), pady=(0, 10))
         log_frame.columnconfigure(0, weight=1)
         log_frame.rowconfigure(0, weight=1)
-        main_frame.rowconfigure(6, weight=1)
-        
-        # Text widget with scrollbar
+        tab1.rowconfigure(6, weight=1)
+
         text_frame = ttk.Frame(log_frame)
         text_frame.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
         text_frame.columnconfigure(0, weight=1)
         text_frame.rowconfigure(0, weight=1)
-        
+
         self.log_text = tk.Text(text_frame, height=10, wrap=tk.WORD)
         scrollbar = ttk.Scrollbar(text_frame, orient=tk.VERTICAL, command=self.log_text.yview)
         self.log_text.configure(yscrollcommand=scrollbar.set)
-        
+
         self.log_text.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
         scrollbar.grid(row=0, column=1, sticky=(tk.N, tk.S))
+
+        # Tab 2 layout (Settings/advanced options)
+        settings_label = ttk.Label(tab2, text="Settings", font=("Arial", 14, "bold"))
+        settings_label.grid(row=0, column=0, pady=(0, 20))
         
     def select_files(self):
         """Select PDF files for translation"""
