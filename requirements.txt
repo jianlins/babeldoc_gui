@@ -1,7 +1,4 @@
 # Requirements for PDF Translation GUI
-# Core GUI framework (usually comes with Python)
-tkinter
-
 # HTTP requests for Ollama communication
 requests>=2.31.0
 pathlib2>=2.3.7 ; python_version >= '3.12'
