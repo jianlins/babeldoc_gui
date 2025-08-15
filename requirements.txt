@@ -4,17 +4,5 @@ tkinter
 
 # HTTP requests for Ollama communication
 requests>=2.31.0
-
-# BabelDOC and its dependencies (should already be installed in your conda environment)
-# babeldoc
-# pymupdf
-# Pillow
-# numpy
-# opencv-python
-# transformers
-# torch
-# torchvision
-
-# Additional dependencies that might be needed
 pathlib2>=2.3.7 ; python_version >= '3.12'
 babeldoc
