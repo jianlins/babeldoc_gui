@@ -228,8 +228,11 @@ jobs:
       - name: Install system dependencies (macOS)
         if: steps.should_build.outputs.build == 'true' && matrix.platform == 'macos'
         run: |
-          # Ensure Python 3.12 and tkinter are installed via Homebrew
-          brew install python@3.12 || true
+          # Ensure Python 3.12 and tcl-tk (for tkinter) are installed via Homebrew
+          brew install python@3.12 tcl-tk || true
+          # Set environment variables so Python finds tcl-tk
+          echo 'export PATH="/usr/local/opt/tcl-tk/bin:$PATH"' >> $GITHUB_ENV
+          echo 'export PKG_CONFIG_PATH="/usr/local/opt/tcl-tk/lib/pkgconfig"' >> $GITHUB_ENV
           # Install UPX for better compression
           brew install upx || true
 
