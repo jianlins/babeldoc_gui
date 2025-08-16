@@ -3,8 +3,8 @@ name: Build and Release
 on:
   push:
     tags:
-      - 'v*'  # Triggers on version tags like v1.0.0, v2.1.3, etc.
-  workflow_dispatch:  # Allows manual triggering
+      - 'v*'
+  workflow_dispatch:
     inputs:
       platforms:
         description: 'Platforms to build for'
@@ -28,7 +28,6 @@ on:
 jobs:
   manage-version:
     runs-on: ubuntu-latest
-    # Only run for manual builds with create_release=true
     if: github.event_name == 'workflow_dispatch' && github.event.inputs.create_release == 'true'
     outputs:
       version: ${{ steps.final_version.outputs.version }}
@@ -52,22 +51,15 @@ jobs:
         run: |
           CURRENT_VERSION="${{ steps.read_version.outputs.current_version }}"
           TAG_NAME="v$CURRENT_VERSION"
-          
-          # Check if tag already exists
           if git tag -l | grep -q "^$TAG_NAME$"; then
             echo "Tag $TAG_NAME already exists, bumping version..."
-            
-            # Parse version parts (assumes semantic versioning: major.minor.patch)
             IFS='.' read -ra VERSION_PARTS <<< "$CURRENT_VERSION"
             MAJOR=${VERSION_PARTS[0]}
             MINOR=${VERSION_PARTS[1]}
             PATCH=${VERSION_PARTS[2]}
-            
-            # Bump patch version
             NEW_PATCH=$((PATCH + 1))
             NEW_VERSION="$MAJOR.$MINOR.$NEW_PATCH"
             NEW_TAG_NAME="v$NEW_VERSION"
-            
             echo "Bumped version to: $NEW_VERSION"
             echo "new_version=$NEW_VERSION" >> $GITHUB_OUTPUT
             echo "needs_bump=true" >> $GITHUB_OUTPUT
@@ -84,11 +76,7 @@ jobs:
         run: |
           NEW_VERSION="${{ steps.bump_version.outputs.new_version }}"
           echo "Updating _version.py with version: $NEW_VERSION"
-          
-          # Update the version file
           sed -i "s/__version__ = .*/__version__ = \"$NEW_VERSION\"/" src/_version.py
-          
-          # Verify the change
           echo "Updated version file contents:"
           cat src/_version.py
 
@@ -106,15 +94,11 @@ jobs:
         run: |
           TAG_NAME="${{ steps.bump_version.outputs.tag_name }}"
           VERSION="${{ steps.bump_version.outputs.new_version }}"
-          
-          # Configure git user (needed for tag creation)
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
-          
           echo "Creating tag: $TAG_NAME"
           git tag -a "$TAG_NAME" -m "Release $VERSION"
           git push origin "$TAG_NAME"
-          
           echo "Tag created successfully: $TAG_NAME"
 
       - name: Set final outputs
@@ -126,7 +110,6 @@ jobs:
   create-release:
     runs-on: ubuntu-latest
     needs: [manage-version]
-    # Only create release for tag pushes or manual builds with create_release=true
     if: always() && (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.event.inputs.create_release == 'true'))
     outputs:
       upload_url: ${{ steps.create_release.outputs.upload_url }}
@@ -139,10 +122,8 @@ jobs:
         id: get_version
         run: |
           if [ "${{ github.event_name }}" = "push" ]; then
-            # For tag pushes, extract version from tag
             VERSION=$(echo ${{ github.ref_name }} | sed 's/^v//')
           else
-            # For manual builds, use the managed version
             VERSION="${{ needs.manage-version.outputs.version }}"
           fi
           echo "version=$VERSION" >> $GITHUB_OUTPUT
@@ -161,7 +142,6 @@ jobs:
 
   build:
     needs: [create-release]
-    # Always run for tag pushes, or for manual builds regardless of create_release setting
     if: always() && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && (needs.create-release.result == 'success' || needs.create-release.result == 'skipped')
     strategy:
       matrix:
@@ -200,11 +180,9 @@ jobs:
         id: should_build
         shell: bash
         run: |
-          # For tag pushes, build all platforms
           if [ "${{ github.event_name }}" = "push" ]; then
             echo "build=true" >> $GITHUB_OUTPUT
             echo "Building all platforms for release"
-          # For manual builds, check selected platforms
           elif [[ "${{ github.event.inputs.platforms }}" == *"${{ matrix.platform }}"* ]]; then
             echo "build=true" >> $GITHUB_OUTPUT
             echo "Building ${{ matrix.platform }} (selected in manual build)"
@@ -239,25 +217,21 @@ jobs:
       - name: Install system dependencies (macOS)
         if: steps.should_build.outputs.build == 'true' && matrix.platform == 'macos'
         run: |
-          # Ensure Python 3.12 and tcl-tk (for tkinter) are installed via Homebrew
           brew install python@3.12 tcl-tk || true
-          # Set environment variables so Python finds tcl-tk
           echo 'export PATH="/usr/local/opt/tcl-tk/bin:$PATH"' >> $GITHUB_ENV
           echo 'export PKG_CONFIG_PATH="/usr/local/opt/tcl-tk/lib/pkgconfig"' >> $GITHUB_ENV
-          # Install UPX for better compression
           brew install upx || true
 
       - name: Install system dependencies (Windows)
         if: steps.should_build.outputs.build == 'true' && matrix.os == 'windows-latest'
         run: |
-          # Install UPX for better compression
           choco install upx -y || echo "UPX installation failed, continuing without it"
 
       - name: Create virtual environment
         if: steps.should_build.outputs.build == 'true'
         run: |
           python -m venv venv
-          
+
       - name: Activate virtual environment (Windows)
         if: steps.should_build.outputs.build == 'true' && matrix.os == 'windows-latest'
         run: |
@@ -296,14 +270,10 @@ jobs:
           python -c "
           import os
           import sys
-          
-          # Create stub babeldoc modules for compilation
           stub_dir = 'babeldoc_stub'
           os.makedirs(f'{stub_dir}/babeldoc/format/pdf', exist_ok=True)
           os.makedirs(f'{stub_dir}/babeldoc/translator', exist_ok=True)
           os.makedirs(f'{stub_dir}/babeldoc/docvision', exist_ok=True)
-          
-          # Create __init__.py files
           init_files = [
               f'{stub_dir}/babeldoc/__init__.py',
               f'{stub_dir}/babeldoc/format/__init__.py',
@@ -311,25 +281,17 @@ jobs:
               f'{stub_dir}/babeldoc/translator/__init__.py',
               f'{stub_dir}/babeldoc/docvision/__init__.py'
           ]
-          
           for init_file in init_files:
               with open(init_file, 'w') as f:
                   f.write('# Stub module\\n')
-          
-          # Create stub modules
           with open(f'{stub_dir}/babeldoc/format/pdf/high_level.py', 'w') as f:
               f.write('def translate_pdf(*args, **kwargs):\\n    raise ImportError(\"BabelDOC not available in this build\")\\n')
-          
           with open(f'{stub_dir}/babeldoc/format/pdf/translation_config.py', 'w') as f:
               f.write('class TranslationConfig:\\n    def __init__(self, *args, **kwargs):\\n        raise ImportError(\"BabelDOC not available in this build\")\\n')
-          
           with open(f'{stub_dir}/babeldoc/translator/translator.py', 'w') as f:
               f.write('class OpenAITranslator:\\n    def __init__(self, *args, **kwargs):\\n        raise ImportError(\"BabelDOC not available in this build\")\\n')
-          
           with open(f'{stub_dir}/babeldoc/docvision/doclayout.py', 'w') as f:
               f.write('class DocLayoutModel:\\n    def __init__(self, *args, **kwargs):\\n        raise ImportError(\"BabelDOC not available in this build\")\\n')
-          
-          # Add to Python path
           sys.path.insert(0, stub_dir)
           print('Created stub babeldoc modules')
           "
@@ -339,30 +301,23 @@ jobs:
         run: |
           python -c "
           import os
-          
-          # Determine target architecture for macOS
           target_arch = None
           if '${{ matrix.os }}' == 'macos-latest' and '${{ matrix.arch }}' == 'arm64':
               target_arch = 'arm64'
-          
           spec_content = '''
           # -*- mode: python ; coding: utf-8 -*-
           import sys
           import os
-          
           block_cipher = None
-          
-          # Add babeldoc stub to path if needed
           if os.path.exists('babeldoc_stub'):
               sys.path.insert(0, 'babeldoc_stub')
-          
           a = Analysis(
               ['src/main.py'],
               pathex=[],
               binaries=[],
               datas=[
-                  ('icons/*', 'icons'),  # Include icon files
-                  ('example_config.toml', '.'),  # Include example config
+                  ('icons/*', 'icons'),
+                  ('example_config.toml', '.'),
               ],
               hiddenimports=[
                   'tkinter',
@@ -390,9 +345,7 @@ jobs:
               cipher=block_cipher,
               noarchive=False,
           )
-          
           pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
-          
           exe = EXE(
               pyz,
               a.scripts,
@@ -407,18 +360,17 @@ jobs:
               upx=True,
               upx_exclude=[],
               runtime_tmpdir=None,
-              onefile=True,  # Create a single executable file
+              onefile=True,
               noupx=False,
-              console=False,  # Set to False for GUI app
+              console=False,
               disable_windowed_traceback=False,
               argv_emulation=False,
               target_arch=''' + repr(target_arch) + ''',
               codesign_identity=None,
               entitlements_file=None,
-              icon='icons/app_icon.ico' if '${{ matrix.os }}' == 'windows-latest' else ('icons/app_icon.icns' if '${{ matrix.os }}' == 'macos-latest' else None),  # Add platform-specific icons
+              icon='icons/app_icon.ico' if '${{ matrix.os }}' == 'windows-latest' else ('icons/app_icon.icns' if '${{ matrix.os }}' == 'macos-latest' else None),
           )
           '''
-          
           with open('babeldoc_gui.spec', 'w') as f:
               f.write(spec_content)
           "
@@ -427,19 +379,14 @@ jobs:
         if: steps.should_build.outputs.build == 'true'
         shell: bash
         run: |
-          # Set up virtual display for Ubuntu (headless GUI compilation)
           if [ "${{ matrix.os }}" = "ubuntu-latest" ]; then
             export DISPLAY=:99
             Xvfb :99 -screen 0 1024x768x24 > /dev/null 2>&1 &
             sleep 3
           fi
-
-          # Set architecture environment for macOS builds (for dependencies)
           if [ "${{ matrix.os }}" = "macos-latest" ] && [ "${{ matrix.arch }}" = "arm64" ]; then
             export ARCHFLAGS="-arch arm64"
           fi
-
-          # Always use the latest main.spec for building releases
           pyinstaller main.spec
 
       - name: Verify build
@@ -461,47 +408,13 @@ jobs:
             mv dist/main dist/babeldoc_gui
           fi
 
-      - name: Test executable (basic smoke test)
-        if: steps.should_build.outputs.build == 'true'
-        continue-on-error: true
+      - name: Rename main to babeldoc_gui (macOS only)
+        if: steps.should_build.outputs.build == 'true' && matrix.os == 'macos-latest'
         shell: bash
         run: |
-          # Basic smoke test - just try to import and check if executable responds
-          if [ "${{ matrix.os }}" = "ubuntu-latest" ]; then
-            # Use xvfb for Ubuntu headless testing
-            export DISPLAY=:99
-            timeout 10 ./dist/babeldoc_gui --help || echo "GUI test skipped (expected for headless environment)"
-          elif [ "${{ matrix.os }}" = "macos-latest" ]; then
-            # For macOS, test might fail in headless environment, that's OK
-            timeout 10 ./dist/babeldoc_gui --help || echo "GUI test skipped (expected for headless macOS environment)"
-          else
-            # Windows
-            timeout 10 ./dist/babeldoc_gui.exe --help || echo "GUI test skipped (expected for headless environment)"
+          if [ -f dist/main ]; then
+            mv dist/main dist/babeldoc_gui
           fi
-
-      - name: Create archive name
-        if: steps.should_build.outputs.build == 'true'
-        id: archive_name
-        shell: bash
-        run: |
-          if [ "${{ github.event_name }}" = "push" ]; then
-            # For releases, use the tag name
-            if [ "${{ matrix.platform }}" = "macos" ] && [ "${{ matrix.arch }}" = "arm64" ]; then
-              ARCHIVE_NAME="babeldoc_gui-${{ matrix.platform }}-${{ matrix.arch }}"
-            else
-              ARCHIVE_NAME="babeldoc_gui-${{ matrix.platform }}-${{ matrix.arch }}"
-            fi
-          else
-            # For manual builds, add timestamp
-            TIMESTAMP=$(date +%Y%m%d-%H%M%S)
-            if [ "${{ matrix.platform }}" = "macos" ] && [ "${{ matrix.arch }}" = "arm64" ]; then
-              ARCHIVE_NAME="babeldoc_gui-${{ matrix.platform }}-${{ matrix.arch }}-${TIMESTAMP}"
-            else
-              ARCHIVE_NAME="babeldoc_gui-${{ matrix.platform }}-${{ matrix.arch }}-${TIMESTAMP}"
-            fi
-          fi
-          echo "ARCHIVE_NAME=$ARCHIVE_NAME" >> $GITHUB_OUTPUT
-          echo "Archive name: $ARCHIVE_NAME"
 
       - name: Create archive (Unix)
         if: steps.should_build.outputs.build == 'true' && matrix.os != 'windows-latest'
