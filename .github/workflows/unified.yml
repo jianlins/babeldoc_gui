@@ -163,18 +163,6 @@ jobs:
     needs: [create-release]
     # Always run for tag pushes, or for manual builds regardless of create_release setting
     if: always() && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && (needs.create-release.result == 'success' || needs.create-release.result == 'skipped')
-    steps:
-      - name: Rename run to "build test" if not creating release
-        if: github.event_name == 'workflow_dispatch' && github.event.inputs.create_release != 'true'
-        uses: actions/github-script@v7
-        with:
-          script: |
-            github.rest.actions.updateWorkflowRun({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              run_id: context.runId,
-              name: "build test"
-            })
     strategy:
       matrix:
         include:
