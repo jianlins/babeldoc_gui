@@ -439,7 +439,15 @@ jobs:
           if [ "${{ matrix.os }}" = "windows-latest" ]; then
             file dist/babeldoc_gui.exe
           else
-            file dist/babeldoc_gui
+            file dist/main
+          fi
+
+      - name: Rename main to babeldoc_gui (Linux only)
+        if: steps.should_build.outputs.build == 'true' && matrix.os == 'ubuntu-latest'
+        shell: bash
+        run: |
+          if [ -f dist/main ]; then
+            mv dist/main dist/babeldoc_gui
           fi
 
       - name: Test executable (basic smoke test)
