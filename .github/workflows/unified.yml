@@ -412,7 +412,7 @@ jobs:
               f.write(spec_content)
           "
 
-      - name: Build executable with PyInstaller
+      - name: Build executable with PyInstaller (always rebuilds with latest extraction logic)
         if: steps.should_build.outputs.build == 'true'
         shell: bash
         run: |
@@ -422,14 +422,14 @@ jobs:
             Xvfb :99 -screen 0 1024x768x24 > /dev/null 2>&1 &
             sleep 3
           fi
-          
+
           # Set architecture environment for macOS builds (for dependencies)
           if [ "${{ matrix.os }}" = "macos-latest" ] && [ "${{ matrix.arch }}" = "arm64" ]; then
             export ARCHFLAGS="-arch arm64"
           fi
-          
-          # Build with PyInstaller using the spec file
-          pyinstaller babeldoc_gui.spec
+
+          # Always use the latest main.spec for building releases
+          pyinstaller main.spec
 
       - name: Verify build
         if: steps.should_build.outputs.build == 'true'
