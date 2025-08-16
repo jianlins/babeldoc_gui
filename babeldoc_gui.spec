@@ -2,27 +2,32 @@
 
 import sys
 import os
-
 from PyInstaller.utils.hooks import collect_submodules, collect_data_files
 
-scipy_hidden = collect_submodules("scipy")
-scipy_datas = collect_data_files("scipy")
-
-hiddenimports = [
-    "tiktoken_ext.openai_public",
-    # keep your platform conditions (e.g., AppKit on mac) as before
-]
-hiddenimports += scipy_hidden                   # <-- add
-
-datas = (datas if 'datas' in globals() else []) # if you already defined datas
-datas += scipy_datas  
+BASE_DIR = os.getcwd()
+runtime_hooks = [os.path.join(BASE_DIR, "pyi_rth_tiktoken_o200k.py")]
 
 
 IS_MAC = sys.platform == "darwin"
 IS_WIN = sys.platform == "win32"
 IS_LIN = sys.platform.startswith("linux")
 
-# --------- Optional: cache assets under unique folders in the bundle ----------
+# --------- SciPy / NumPy ----------
+scipy_hidden = collect_submodules("scipy")
+scipy_datas  = collect_data_files("scipy")
+
+numpy_hidden = []
+numpy_hidden += collect_submodules("numpy.fft")
+numpy_hidden += collect_submodules("numpy.linalg")
+numpy_hidden += collect_submodules("numpy.random")
+# optional,再保险：
+# numpy_hidden += collect_submodules("numpy.array_api")
+
+# --------- tiktoken plugin (critical) ----------
+tke_hidden = collect_submodules("tiktoken_ext")                 # include subpackages incl. openai_public
+tke_datas  = collect_data_files("tiktoken_ext.openai_public")   # include encoding JSONs/data
+
+# --------- Optional: 把缓存打包进应用（可留空） ----------
 cache_dirs = [
     os.path.expanduser("~/.cache/babeldoc/tiktoken"),
     os.path.expanduser("~/.cache/babeldoc/models"),
@@ -46,21 +51,30 @@ for cache_dir in cache_dirs:
                     target = rel_path
                 datas.append((full_path, target))
 
-# --------- Icons per-OS ----------
+# merge third-party data
+datas += scipy_datas
+datas += tke_datas
+
+# --------- hiddenimports ----------
+hiddenimports = [
+    "tiktoken_ext.openai_public",  # 插件发现
+]
+if IS_MAC:
+    hiddenimports.append("AppKit")
+
+hiddenimports += scipy_hidden
+hiddenimports += numpy_hidden
+hiddenimports += tke_hidden
+
+# --------- icons ----------
 icon_path = None
 if IS_MAC:
     icon_path = "icons/app_icon.icns"
 elif IS_WIN:
     icon_path = "icons/app_icon.ico"
 
-# --------- Hidden imports per-OS ----------
-hiddenimports = [
-    "tiktoken_ext.openai_public",  # tiktoken plugin discovery
-]
-if IS_MAC:
-    hiddenimports.append("AppKit")
+# --------- runtime hook ----------
 
-# --------- Analysis / Build ----------
 a = Analysis(
     ["src/main.py"],
     pathex=[],
@@ -69,7 +83,7 @@ a = Analysis(
     hiddenimports=hiddenimports,
     hookspath=[],
     hooksconfig={},
-    runtime_hooks=["hook-tiktoken-o200k.py"],
+    runtime_hooks=runtime_hooks,
     excludes=[],
     noarchive=False,
     optimize=0,
@@ -90,17 +104,16 @@ exe = EXE(
     upx=True,
     upx_exclude=[],
     runtime_tmpdir=None,
-    console=False,             # GUI app; set True if you want console
+    console=False,             # GUI app; 设置 True 可调试
     disable_windowed_traceback=False,
-    argv_emulation=False,      # set True only for macOS drag&drop argv emulation
+    argv_emulation=False,      # macOS 下 drag&drop 参数传递才需要 True
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon=icon_path,            # string path; per-OS above
-    onefile=True,              # << IMPORTANT for single-file builds
+    icon=icon_path,
+    onefile=True,              # 单文件模式
 )
 
-# On macOS, wrap the EXE in an .app bundle; other OSes: just produce the EXE
 if IS_MAC:
     app = BUNDLE(
         exe,
