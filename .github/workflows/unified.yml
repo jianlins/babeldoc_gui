@@ -1,5 +1,6 @@
 name: Build and Release
 run-name: Build / create_release ${{ github.event.inputs.create_release }}
+
 on:
   push:
     tags:
@@ -41,13 +42,15 @@ jobs:
 
       - name: Read current version
         id: read_version
+        shell: bash
         run: |
           VERSION=$(python -c "exec(open('src/_version.py').read()); print(__version__)")
-          echo "current_version=$VERSION" >> $GITHUB_OUTPUT
+          echo "current_version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "Current version: $VERSION"
 
       - name: Check if tag exists and bump version if needed
         id: bump_version
+        shell: bash
         run: |
           CURRENT_VERSION="${{ steps.read_version.outputs.current_version }}"
           TAG_NAME="v$CURRENT_VERSION"
@@ -61,17 +64,23 @@ jobs:
             NEW_VERSION="$MAJOR.$MINOR.$NEW_PATCH"
             NEW_TAG_NAME="v$NEW_VERSION"
             echo "Bumped version to: $NEW_VERSION"
-            echo "new_version=$NEW_VERSION" >> $GITHUB_OUTPUT
-            echo "needs_bump=true" >> $GITHUB_OUTPUT
-            echo "tag_name=$NEW_TAG_NAME" >> $GITHUB_OUTPUT
+            {
+              echo "new_version=$NEW_VERSION"
+              echo "needs_bump=true"
+              echo "tag_name=$NEW_TAG_NAME"
+            } >> "$GITHUB_OUTPUT"
           else
             echo "Tag $TAG_NAME does not exist, using current version"
-            echo "new_version=$CURRENT_VERSION" >> $GITHUB_OUTPUT
-            echo "needs_bump=false" >> $GITHUB_OUTPUT
-            echo "tag_name=$TAG_NAME" >> $GITHUB_OUTPUT
+            {
+              echo "new_version=$CURRENT_VERSION"
+              echo "needs_bump=false"
+              echo "tag_name=$TAG_NAME"
+            } >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Update version file if needed
         if: steps.bump_version.outputs.needs_bump == 'true'
+        shell: bash
         run: |
           NEW_VERSION="${{ steps.bump_version.outputs.new_version }}"
           echo "Updating _version.py with version: $NEW_VERSION"
@@ -80,6 +89,7 @@ jobs:
 
       - name: Commit version update
         if: steps.bump_version.outputs.needs_bump == 'true'
+        shell: bash
         run: |
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
@@ -89,6 +99,7 @@ jobs:
 
       - name: Create tag
         id: create_tag
+        shell: bash
         run: |
           TAG_NAME="${{ steps.bump_version.outputs.tag_name }}"
           VERSION="${{ steps.bump_version.outputs.new_version }}"
@@ -99,9 +110,10 @@ jobs:
 
       - name: Set final outputs
         id: final_version
+        shell: bash
         run: |
-          echo "version=${{ steps.bump_version.outputs.new_version }}" >> $GITHUB_OUTPUT
-          echo "tag_name=${{ steps.bump_version.outputs.tag_name }}" >> $GITHUB_OUTPUT
+          echo "version=${{ steps.bump_version.outputs.new_version }}" >> "$GITHUB_OUTPUT"
+          echo "tag_name=${{ steps.bump_version.outputs.tag_name }}" >> "$GITHUB_OUTPUT"
 
   create-release:
     runs-on: ubuntu-latest
@@ -116,13 +128,14 @@ jobs:
 
       - name: Get version
         id: get_version
+        shell: bash
         run: |
           if [ "${{ github.event_name }}" = "push" ]; then
-            VERSION=$(echo ${{ github.ref_name }} | sed 's/^v//')
+            VERSION="${{ github.ref_name#v }}"
           else
             VERSION="${{ needs.manage-version.outputs.version }}"
           fi
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "Found version: $VERSION"
 
       - name: Create Release
@@ -131,7 +144,8 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          tag_name: ${{ needs.manage-version.outputs.tag_name || github.ref_name || format('manual-{0}', github.run_number) }}
+          # push 事件使用触发的 tag；手动触发使用 manage-version 产出的 tag
+          tag_name: ${{ github.event_name == 'push' && github.ref_name || needs.manage-version.outputs.tag_name }}
           release_name: ${{ github.event.repository.name }}-${{ steps.get_version.outputs.version }}
           draft: false
           prerelease: ${{ github.event_name == 'workflow_dispatch' }}
@@ -159,43 +173,35 @@ jobs:
             archive_extension: ".tar.gz"
     runs-on: ${{ matrix.os }}
     steps:
-      - name: Check if platform should be built (Windows)
-        if: matrix.os == 'windows-latest'
+      # —— 统一 bash 的“是否构建”判定（Windows / 非 Windows 共用同一输出）——
+      - name: Check if platform should be built
         id: should_build
-        shell: C:\Program Files\Git\bin\bash.EXE --noprofile --norc -e -o pipefail {0}
-        run: |
-          if [ "${{ github.event_name }}" = "push" ]; then
-            echo "build=true" >> $GITHUB_OUTPUT
-            echo "Building all platforms for release"
-          elif [[ "${{ github.event.inputs.platforms }}" == *"${{ matrix.platform }}"* ]]; then
-            echo "build=true" >> $GITHUB_OUTPUT
-            echo "Building ${{ matrix.platform }} (selected in manual build)"
-          else
-            echo "build=false" >> $GITHUB_OUTPUT
-            echo "Skipping ${{ matrix.platform }} (not selected in manual build)"
-      - name: Check if platform should be built (Non-Windows)
-        if: matrix.os != 'windows-latest'
         shell: bash
         run: |
           if [ "${{ github.event_name }}" = "push" ]; then
-            echo "build=true" >> $GITHUB_OUTPUT
+            echo "build=true" >> "$GITHUB_OUTPUT"
             echo "Building all platforms for release"
           elif [[ "${{ github.event.inputs.platforms }}" == *"${{ matrix.platform }}"* ]]; then
-            echo "build=true" >> $GITHUB_OUTPUT
+            echo "build=true" >> "$GITHUB_OUTPUT"
             echo "Building ${{ matrix.platform }} (selected in manual build)"
           else
-            echo "build=false" >> $GITHUB_OUTPUT
+            echo "build=false" >> "$GITHUB_OUTPUT"
             echo "Skipping ${{ matrix.platform }} (not selected in manual build)"
+          fi
+
       - name: Checkout code
         if: steps.should_build.outputs.build == 'true'
         uses: actions/checkout@v4
+
       - name: Set up Python
         if: steps.should_build.outputs.build == 'true'
         uses: actions/setup-python@v4
         with:
           python-version: '3.12'
+
       - name: Install system dependencies (Ubuntu)
         if: steps.should_build.outputs.build == 'true' && matrix.os == 'ubuntu-latest'
+        shell: bash
         run: |
           sudo apt-get update
           sudo apt-get install -y \
@@ -206,91 +212,96 @@ jobs:
             xvfb \
             upx-ucl \
             binutils
+
       - name: Install system dependencies (macOS)
         if: steps.should_build.outputs.build == 'true' && matrix.platform == 'macos'
-        run: |
-          brew install python@3.12 tcl-tk || true
-          echo 'export PATH="/usr/local/opt/tcl-tk/bin:$PATH"' >> $GITHUB_ENV
-          echo 'export PKG_CONFIG_PATH="/usr/local/opt/tcl-tk/lib/pkgconfig"' >> $GITHUB_ENV
-          brew install upx || true
-      - name: Install system dependencies (Windows)
-        if: steps.should_build.outputs.build == 'true' && matrix.os == 'windows-latest'
-        run: |
-          choco install upx -y || echo "UPX installation failed, continuing without it"
-      - name: Create virtual environment
-        if: steps.should_build.outputs.build == 'true'
-        run: |
-          python -m venv venv
-      - name: Activate virtual environment (Windows)
-        if: steps.should_build.outputs.build == 'true' && matrix.os == 'windows-latest'
-        run: |
-          venv\Scripts\activate
-          echo "VIRTUAL_ENV=${{ github.workspace }}\venv" >> $GITHUB_ENV
-          echo "${{ github.workspace }}\venv\Scripts" >> $GITHUB_PATH
-      - name: Activate virtual environment (Unix)
-        if: steps.should_build.outputs.build == 'true' && matrix.os != 'windows-latest'
         shell: bash
         run: |
-          source venv/bin/activate
-          echo "VIRTUAL_ENV=${{ github.workspace }}/venv" >> $GITHUB_ENV
-          echo "${{ github.workspace }}/venv/bin" >> $GITHUB_PATH
+          brew install python@3.12 tcl-tk || true
+          echo 'export PATH="/usr/local/opt/tcl-tk/bin:$PATH"' >> "$GITHUB_ENV"
+          echo 'export PKG_CONFIG_PATH="/usr/local/opt/tcl-tk/lib/pkgconfig"' >> "$GITHUB_ENV"
+          brew install upx || true
+
+      - name: Install system dependencies (Windows)
+        if: steps.should_build.outputs.build == 'true' && matrix.os == 'windows-latest'
+        shell: bash
+        run: |
+          choco install upx -y || echo "UPX installation failed, continuing without it"
+
+      - name: Create virtual environment
+        if: steps.should_build.outputs.build == 'true'
+        shell: bash
+        run: |
+          python -m venv venv
+          if [ -f "venv/Scripts/activate" ]; then
+            echo "VIRTUAL_ENV=${{ github.workspace }}/venv" >> "$GITHUB_ENV"
+            echo "${{ github.workspace }}/venv/Scripts" >> "$GITHUB_PATH"
+            echo 'source venv/Scripts/activate' >> "$GITHUB_ENV"
+          else
+            echo "VIRTUAL_ENV=${{ github.workspace }}/venv" >> "$GITHUB_ENV"
+            echo "${{ github.workspace }}/venv/bin" >> "$GITHUB_PATH"
+            echo 'source venv/bin/activate' >> "$GITHUB_ENV"
+          fi
+
       - name: Upgrade pip and install build tools
         if: steps.should_build.outputs.build == 'true'
+        shell: bash
         run: |
           python -m pip install --upgrade pip
           pip install wheel setuptools
+
       - name: Install PyInstaller
         if: steps.should_build.outputs.build == 'true'
+        shell: bash
         run: |
           pip install pyinstaller==6.3.0
+
       - name: Install all requirements from requirements.txt
         if: steps.should_build.outputs.build == 'true'
+        shell: bash
         run: |
           pip install -r requirements.txt || echo "Some dependencies may not be available, continuing with stub implementation if needed"
+
       - name: Create stub babeldoc module (fallback)
         if: steps.should_build.outputs.build == 'true'
         shell: bash
         run: |
-          python -c "
-          import os
-          import sys
+          python - <<'PY'
+          import os, sys
           stub_dir = 'babeldoc_stub'
           os.makedirs(f'{stub_dir}/babeldoc/format/pdf', exist_ok=True)
           os.makedirs(f'{stub_dir}/babeldoc/translator', exist_ok=True)
           os.makedirs(f'{stub_dir}/babeldoc/docvision', exist_ok=True)
-          init_files = [
+          for p in [
               f'{stub_dir}/babeldoc/__init__.py',
               f'{stub_dir}/babeldoc/format/__init__.py',
               f'{stub_dir}/babeldoc/format/pdf/__init__.py',
               f'{stub_dir}/babeldoc/translator/__init__.py',
               f'{stub_dir}/babeldoc/docvision/__init__.py'
-          ]
-          for init_file in init_files:
-              with open(init_file, 'w') as f:
-                  f.write('# Stub module\\n')
+          ]:
+              with open(p, 'w') as f: f.write('# Stub module\n')
           with open(f'{stub_dir}/babeldoc/format/pdf/high_level.py', 'w') as f:
-              f.write('def translate_pdf(*args, **kwargs):\\n    raise ImportError(\"BabelDOC not available in this build\")\\n')
+              f.write('def translate_pdf(*args, **kwargs):\n    raise ImportError("BabelDOC not available in this build")\n')
           with open(f'{stub_dir}/babeldoc/format/pdf/translation_config.py', 'w') as f:
-              f.write('class TranslationConfig:\\n    def __init__(self, *args, **kwargs):\\n        raise ImportError(\"BabelDOC not available in this build\")\\n')
+              f.write('class TranslationConfig:\n    def __init__(self, *args, **kwargs):\n        raise ImportError("BabelDOC not available in this build")\n')
           with open(f'{stub_dir}/babeldoc/translator/translator.py', 'w') as f:
-              f.write('class OpenAITranslator:\\n    def __init__(self, *args, **kwargs):\\n        raise ImportError(\"BabelDOC not available in this build\")\\n')
+              f.write('class OpenAITranslator:\n    def __init__(self, *args, **kwargs):\n        raise ImportError("BabelDOC not available in this build")\n')
           with open(f'{stub_dir}/babeldoc/docvision/doclayout.py', 'w') as f:
-              f.write('class DocLayoutModel:\\n    def __init__(self, *args, **kwargs):\\n        raise ImportError(\"BabelDOC not available in this build\")\\n')
+              f.write('class DocLayoutModel:\n    def __init__(self, *args, **kwargs):\n        raise ImportError("BabelDOC not available in this build")\n')
           sys.path.insert(0, stub_dir)
           print('Created stub babeldoc modules')
-          "
+          PY
+
       - name: Create PyInstaller spec file
         if: steps.should_build.outputs.build == 'true'
+        shell: bash
         run: |
-          python -c "
+          python - <<'PY'
           import os
           target_arch = None
-          if '${{ matrix.os }}' == 'macos-latest' and '${{ matrix.arch }}' == 'arm64':
-              target_arch = 'arm64'
-          spec_content = '''
+          spec_content = f"""
           # -*- mode: python ; coding: utf-8 -*-
-          import sys
-          import os
+          import sys, os
           block_cipher = None
           if os.path.exists('babeldoc_stub'):
               sys.path.insert(0, 'babeldoc_stub')
@@ -303,24 +314,12 @@ jobs:
                   ('example_config.toml', '.'),
               ],
               hiddenimports=[
-                  'tkinter',
-                  'tkinter.ttk',
-                  'tkinter.filedialog',
-                  'tkinter.messagebox',
-                  'requests',
-                  'json',
-                  'pathlib',
-                  'urllib.parse',
-                  'threading',
-                  'asyncio',
-                  'logging',
-                  'platform',
-                  'tomllib',
-                  'tomli',
-                  'tomli_w',
+                  'tkinter','tkinter.ttk','tkinter.filedialog','tkinter.messagebox',
+                  'requests','json','pathlib','urllib.parse','threading','asyncio',
+                  'logging','platform','tomllib','tomli','tomli_w',
               ],
               hookspath=[],
-              hooksconfig={},
+              hooksconfig={{}},
               runtime_hooks=[],
               excludes=[],
               win_no_prefer_redirects=False,
@@ -348,52 +347,40 @@ jobs:
               console=False,
               disable_windowed_traceback=False,
               argv_emulation=False,
-              target_arch=''' + repr(target_arch) + ''',
+              target_arch={repr(target_arch)},
               codesign_identity=None,
               entitlements_file=None,
-              icon='icons/app_icon.ico' if '${{ matrix.os }}' == 'windows-latest' else ('icons/app_icon.icns' if '${{ matrix.os }}' == 'macos-latest' else None),
+              icon='icons/app_icon.ico' if '{os.getenv('RUNNER_OS')}' == 'Windows' else ('icons/app_icon.icns' if '{os.getenv('RUNNER_OS')}' == 'macOS' else None),
           )
-          '''
-          with open('babeldoc_gui.spec', 'w') as f:
+          """
+          with open('babeldoc_gui.spec', 'w', encoding='utf-8') as f:
               f.write(spec_content)
-          "
-      - name: Build executable with PyInstaller (always rebuilds with latest extraction logic)
+          print('Wrote babeldoc_gui.spec')
+          PY
+
+      - name: Build executable with PyInstaller
         if: steps.should_build.outputs.build == 'true'
         shell: bash
         run: |
           if [ "${{ matrix.os }}" = "ubuntu-latest" ]; then
             export DISPLAY=:99
-            Xvfb :99 -screen 0 1024x768x24 > /dev/null 2>&1 &
+            Xvfb :99 -screen 0 1024x768x24 >/dev/null 2>&1 &
             sleep 3
           fi
           if [ "${{ matrix.os }}" = "macos-latest" ] && [ "${{ matrix.arch }}" = "arm64" ]; then
             export ARCHFLAGS="-arch arm64"
           fi
-          pyinstaller main.spec
+          pyinstaller babeldoc_gui.spec
+
       - name: Verify build
         if: steps.should_build.outputs.build == 'true'
         shell: bash
         run: |
           ls -la dist/
           if [ "${{ matrix.os }}" = "windows-latest" ]; then
-            file dist/babeldoc_gui.exe
+            file dist/babeldoc_gui.exe || true
           else
-            file dist/main
-          fi
-      - name: Rename main to babeldoc_gui (Linux only)
-        if: steps.should_build.outputs.build == 'true' && matrix.os == 'ubuntu-latest'
-        shell: bash
-        run: |
-          if [ -f dist/main ]; then
-            mv dist/main dist/babeldoc_gui
-          fi
-
-      - name: Rename main to babeldoc_gui (macOS only)
-        if: steps.should_build.outputs.build == 'true' && matrix.os == 'macos-latest'
-        shell: bash
-        run: |
-          if [ -f dist/main ]; then
-            mv dist/main dist/babeldoc_gui
+            file dist/babeldoc_gui || true
           fi
 
       - name: Test executable (basic smoke test)
@@ -408,6 +395,8 @@ jobs:
             timeout 10 ./dist/babeldoc_gui --help || echo "GUI test skipped (expected for headless macOS environment)"
           else
             timeout 10 ./dist/babeldoc_gui.exe --help || echo "GUI test skipped (expected for headless environment)"
+          fi
+
       - name: Create archive name
         if: steps.should_build.outputs.build == 'true'
         id: archive_name
@@ -419,19 +408,23 @@ jobs:
             TIMESTAMP=$(date +%Y%m%d-%H%M%S)
             ARCHIVE_NAME="babeldoc_gui-${{ matrix.platform }}-${{ matrix.arch }}-${TIMESTAMP}"
           fi
-          echo "ARCHIVE_NAME=$ARCHIVE_NAME" >> $GITHUB_OUTPUT
+          echo "ARCHIVE_NAME=$ARCHIVE_NAME" >> "$GITHUB_OUTPUT"
           echo "Archive name: $ARCHIVE_NAME"
+
       - name: Create archive (Unix)
         if: steps.should_build.outputs.build == 'true' && matrix.os != 'windows-latest'
         shell: bash
         working-directory: dist
         run: |
-          tar -czf "../${{ steps.archive_name.outputs.ARCHIVE_NAME }}${{ matrix.archive_extension }}" babeldoc_gui${{ matrix.binary_extension }}
+          tar -czf "../${{ steps.archive_name.outputs.ARCHIVE_NAME }}${{ matrix.archive_extension }}" "babeldoc_gui${{ matrix.binary_extension }}"
+
       - name: Create archive (Windows)
         if: steps.should_build.outputs.build == 'true' && matrix.os == 'windows-latest'
+        shell: bash
         run: |
           cd dist
-          7z a "../${{ steps.archive_name.outputs.ARCHIVE_NAME }}${{ matrix.archive_extension }}" babeldoc_gui${{ matrix.binary_extension }}
+          7z a "../${{ steps.archive_name.outputs.ARCHIVE_NAME }}${{ matrix.archive_extension }}" "babeldoc_gui${{ matrix.binary_extension }}"
+
       - name: Upload Release Asset
         if: steps.should_build.outputs.build == 'true' && needs.create-release.result == 'success'
         uses: actions/upload-release-asset@v1
@@ -442,6 +435,7 @@ jobs:
           asset_path: ./${{ steps.archive_name.outputs.ARCHIVE_NAME }}${{ matrix.archive_extension }}
           asset_name: ${{ steps.archive_name.outputs.ARCHIVE_NAME }}${{ matrix.archive_extension }}
           asset_content_type: application/octet-stream
+
       - name: Upload build artifacts
         if: steps.should_build.outputs.build == 'true'
         uses: actions/upload-artifact@v4
