@@ -518,8 +518,8 @@ jobs:
       - name: Create archive (Unix)
         if: steps.should_build.outputs.build == 'true' && matrix.os != 'windows-latest'
         shell: bash
+        working-directory: dist
         run: |
-          cd dist
           tar -czf "../${{ steps.archive_name.outputs.ARCHIVE_NAME }}${{ matrix.archive_extension }}" babeldoc_gui${{ matrix.binary_extension }}
 
       - name: Create archive (Windows)
