@@ -159,8 +159,22 @@ jobs:
             archive_extension: ".tar.gz"
     runs-on: ${{ matrix.os }}
     steps:
-      - name: Check if platform should be built
+      - name: Check if platform should be built (Windows)
+        if: matrix.os == 'windows-latest'
         id: should_build
+        shell: C:\Program Files\Git\bin\bash.EXE --noprofile --norc -e -o pipefail {0}
+        run: |
+          if [ "${{ github.event_name }}" = "push" ]; then
+            echo "build=true" >> $GITHUB_OUTPUT
+            echo "Building all platforms for release"
+          elif [[ "${{ github.event.inputs.platforms }}" == *"${{ matrix.platform }}"* ]]; then
+            echo "build=true" >> $GITHUB_OUTPUT
+            echo "Building ${{ matrix.platform }} (selected in manual build)"
+          else
+            echo "build=false" >> $GITHUB_OUTPUT
+            echo "Skipping ${{ matrix.platform }} (not selected in manual build)"
+      - name: Check if platform should be built (Non-Windows)
+        if: matrix.os != 'windows-latest'
         shell: bash
         run: |
           if [ "${{ github.event_name }}" = "push" ]; then
@@ -373,6 +387,7 @@ jobs:
           if [ -f dist/main ]; then
             mv dist/main dist/babeldoc_gui
           fi
+
       - name: Rename main to babeldoc_gui (macOS only)
         if: steps.should_build.outputs.build == 'true' && matrix.os == 'macos-latest'
         shell: bash
@@ -380,6 +395,7 @@ jobs:
           if [ -f dist/main ]; then
             mv dist/main dist/babeldoc_gui
           fi
+
       - name: Test executable (basic smoke test)
         if: steps.should_build.outputs.build == 'true'
         continue-on-error: true
