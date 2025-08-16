@@ -1,5 +1,2 @@
-# Requirements for PDF Translation GUI
-# HTTP requests for Ollama communication
-requests>=2.31.0
-pathlib2>=2.3.7 ; python_version >= '3.12'
+tiktoken
 babeldoc

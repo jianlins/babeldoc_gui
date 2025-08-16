@@ -1,0 +1,7 @@
+- [x] Analyze requirements
+- [x] Patch tiktoken registry for o200k_base encoding
+- [x] Compile binary with PyInstaller
+- [x] Test binary for encoding registration and translation workflow
+- [x] Diagnose and attempt fix with runtime hook
+- [ ] Patch tiktoken directly in site-packages to statically register o200k_base before freezing
+- [ ] Recompile and test binary

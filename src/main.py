@@ -1,8 +1,58 @@
 #!/usr/bin/env python3
+print("PDF Translator GUI: src/main.py executed")
 """
 PDF Translation GUI Application using BabelDOC and Ollama
 A Python GUI application for translating PDF files to Chinese using BabelDOC and local Ollama LLM server.
 """
+
+def ensure_o200k_base_encoding():
+    try:
+        import tiktoken
+        import sys
+        # Try public API first
+        try:
+            tiktoken.get_encoding("o200k_base")
+            print("Try loading o200k_base encoding.")
+            return
+        except Exception:
+            pass
+        # Try monkey-patching ENCODING_CONSTRUCTORS directly
+        try:
+            registry = getattr(tiktoken, "registry", None)
+            if registry:
+                # Try to force constructor population
+                if hasattr(registry, "_find_constructors"):
+                    registry._find_constructors()
+                enc_constructors = getattr(registry, "ENCODING_CONSTRUCTORS", None)
+                if enc_constructors and "cl100k_base" in enc_constructors:
+                    enc_constructors["o200k_base"] = enc_constructors["cl100k_base"]
+                    print("Monkey-patched ENCODING_CONSTRUCTORS for o200k_base.")
+                    # Try to clear lru_cache if present
+                    if hasattr(registry, "_available_plugin_modules"):
+                        try:
+                            registry._available_plugin_modules.cache_clear()
+                        except Exception:
+                            pass
+                else:
+                    print("cl100k_base not found in ENCODING_CONSTRUCTORS.")
+            else:
+                print("tiktoken.registry not found.")
+        except Exception as e:
+            print(f"Failed to monkey-patch ENCODING_CONSTRUCTORS: {e}")
+        # Try fallback registry patch
+        try:
+            reg = getattr(registry, "_registry", None) if registry else None
+            if reg and hasattr(reg, "__setitem__") and "cl100k_base" in reg:
+                reg["o200k_base"] = reg["cl100k_base"]
+                print("Patched o200k_base encoding as alias for cl100k_base in registry._registry.")
+            else:
+                print("Unable to patch registry._registry for o200k_base.")
+        except Exception as e:
+            print(f"Failed to patch registry._registry: {e}")
+    except Exception as e:
+        print(f"Failed to ensure o200k_base encoding in tiktoken: {e}")
+
+ensure_o200k_base_encoding()
 
 import asyncio
 import base64
@@ -20,6 +70,71 @@ from tkinter import filedialog, messagebox, ttk
 from typing import List, Optional
 
 import requests
+
+# Ensure BabelDOC cache/model file is present, download if missing
+def ensure_babeldoc_cache():
+    import sys
+    import shutil
+    if getattr(sys, 'frozen', False):
+        # Running in PyInstaller bundle
+        default_cache_dir = os.path.expanduser("~/.cache/babeldoc")
+        bundle_models_dir = os.path.join(sys._MEIPASS, "models")
+        print(f"Ensuring models are extracted from bundle to: {default_cache_dir}")
+        import shutil
+        if not os.path.exists(default_cache_dir) or not any(os.scandir(default_cache_dir)):
+            try:
+                shutil.copytree(bundle_models_dir, default_cache_dir, dirs_exist_ok=True)
+                print("Model files extracted from bundle to ~/.cache/babeldoc.")
+            except Exception as e:
+                print(f"Failed to extract model files: {e}")
+        else:
+            print("Model files already exist in ~/.cache/babeldoc, extraction skipped.")
+        return
+    else:
+        cache_dir = os.path.expanduser("~/.cache/babeldoc/tiktoken")
+        cache_file_name = "model.bin"  # Replace with actual expected file name if needed
+
+        # Find the correct folder dynamically
+        folder_name = None
+        if os.path.exists(cache_dir):
+            for entry in os.listdir(cache_dir):
+                folder_path = os.path.join(cache_dir, entry)
+                if os.path.isdir(folder_path):
+                    # Check for expected file
+                    file_path = os.path.join(folder_path, cache_file_name)
+                    if os.path.exists(file_path):
+                        folder_name = entry
+                        break
+            # If no folder found, pick the first one (fallback)
+            if not folder_name:
+                folders = [d for d in os.listdir(cache_dir) if os.path.isdir(os.path.join(cache_dir, d))]
+                if folders:
+                    folder_name = folders[0]
+        else:
+            os.makedirs(cache_dir, exist_ok=True)
+
+        # If no folder exists, create one with a random name
+        if not folder_name:
+            import uuid
+            folder_name = uuid.uuid4().hex
+            os.makedirs(os.path.join(cache_dir, folder_name), exist_ok=True)
+
+        cache_path = os.path.join(cache_dir, folder_name)
+        cache_url = f"https://huggingface.co/datasets/awwaawwa/BabelDOC-Assets/resolve/main/tiktoken/{folder_name}?download=true"
+
+        if not os.path.exists(cache_path):
+            os.makedirs(os.path.dirname(cache_path), exist_ok=True)
+            print(f"Downloading BabelDOC tiktoken cache file to {cache_path} ...")
+            try:
+                r = requests.get(cache_url)
+                r.raise_for_status()
+                with open(cache_path, "wb") as f:
+                    f.write(r.content)
+                print("Download complete.")
+            except Exception as e:
+                print(f"Failed to download BabelDOC tiktoken cache file: {e}")
+
+ensure_babeldoc_cache()
 
 # Import TOML for configuration handling
 try:
@@ -41,6 +156,49 @@ try:
     from babeldoc.format.pdf.translation_config import TranslationConfig
     from babeldoc.translator.translator import OpenAITranslator
     from babeldoc.docvision.doclayout import DocLayoutModel
+    import babeldoc.assets.assets
+
+    # Download all required BabelDOC assets (including tiktoken caches) at runtime
+    try:
+        babeldoc.assets.assets.warmup()
+    except Exception as e:
+        print(f"Failed to download BabelDOC assets: {e}")
+except ImportError as e:
+    print(f"Error importing BabelDOC: {e}")
+    print("\nIMPORTANT: Please ensure you're running this in the correct conda environment!")
+    print("Steps to fix this:")
+    print("1. Activate the 'pdf' conda environment:")
+    print("   conda activate pdf")
+    print("2. Then run the application:")
+    print("   python src/main.py")
+    print("\nAlternatively, use the launcher script:")
+    print("   ./run.sh")
+    
+    # Try to show a simple error dialog (only once, main thread only)
+    try:
+        import threading
+        if not hasattr(sys, "_babeldoc_error_shown"):
+            sys._babeldoc_error_shown = True
+            if threading.current_thread() is threading.main_thread():
+                import tkinter as tk
+                from tkinter import messagebox
+                root = tk.Tk()
+                root.withdraw()  # Hide the root window
+                messagebox.showerror(
+                    "BabelDOC Not Found", 
+                    f"Error importing BabelDOC: {e}\n\n"
+                    "Please ensure you're running this in the 'pdf' conda environment:\n"
+                    "1. conda activate pdf\n"
+                    "2. python src/main.py\n\n"
+                    "Or use the launcher script: ./run.sh"
+                )
+                root.destroy()
+    except:
+        pass
+    
+    sys.exit(1)
+except Exception as e:
+    print(f"Failed to download BabelDOC assets: {e}")
 except ImportError as e:
     print(f"Error importing BabelDOC: {e}")
     print("\nIMPORTANT: Please ensure you're running this in the correct conda environment!")
@@ -57,7 +215,7 @@ except ImportError as e:
         import tkinter as tk
         from tkinter import messagebox
         root = tk.Tk()
-        root.withdraw()  # Hide the main window
+        root.withdraw()  # Hide the root window
         messagebox.showerror(
             "BabelDOC Not Found", 
             f"Error importing BabelDOC: {e}\n\n"
@@ -436,7 +594,7 @@ R0lGODlhIAAgAPcAAP///wAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
             self.logger.info("BabelDOC initialized successfully")
         except Exception as e:
             self.logger.error(f"Failed to initialize BabelDOC: {e}")
-            messagebox.showerror("Initialization Error", f"Failed to initialize BabelDOC: {e}")
+            messagebox.showerror("Initialization Error", f"Failed to initialize BabelDOC: {e}", parent=self.root)
     
     def create_menu_bar(self):
         """Create the menu bar"""
@@ -667,7 +825,7 @@ show_api_key = {show_api_key}
         try:
             if messagebox.askyesno("Reset Configuration", 
                                  "Are you sure you want to reset all settings to default values?\n\n"
-                                 "This will not affect your selected files."):
+                                 "This will not affect your selected files.", parent=self.root):
                 # Reset to default values
                 self.ollama_url_var.set("http://localhost:11434")
                 self.model_var.set("qwen2.5:14b")
@@ -687,11 +845,11 @@ show_api_key = {show_api_key}
                     self.config_file.unlink()
                 
                 self.log_message("Configuration reset to defaults")
-                messagebox.showinfo("Reset Complete", "Configuration has been reset to default values.")
+                messagebox.showinfo("Reset Complete", "Configuration has been reset to default values.", parent=self.root)
                 
         except Exception as e:
             self.logger.error(f"Failed to reset configuration: {e}")
-            messagebox.showerror("Reset Error", f"Failed to reset configuration: {e}")
+            messagebox.showerror("Reset Error", f"Failed to reset configuration: {e}", parent=self.root)
     
     def show_configuration_info(self):
         """Show information about the configuration file"""
@@ -715,7 +873,7 @@ Saved settings include:
 
 Note: Input PDF files are NOT saved in the configuration for privacy."""
         
-        messagebox.showinfo("Configuration Information", config_info)
+        messagebox.showinfo("Configuration Information", config_info, parent=self.root)
     
     def export_config_for_cli(self):
         """Export configuration file for use with BabelDOC CLI"""
@@ -756,11 +914,11 @@ The exported configuration includes all your current settings:
 
 Note: You may need to adjust file paths in the config file for different environments."""
                 
-                messagebox.showinfo("Export Complete", usage_info)
+                messagebox.showinfo("Export Complete", usage_info, parent=self.root)
                 
         except Exception as e:
             self.logger.error(f"Failed to export configuration: {e}")
-            messagebox.showerror("Export Error", f"Failed to export configuration: {e}")
+            messagebox.showerror("Export Error", f"Failed to export configuration: {e}", parent=self.root)
     
     def show_about(self):
         """Show about dialog"""
@@ -792,7 +950,7 @@ pip install tkinterdnd2
 
 © 2025 - PDF Translation GUI"""
         
-        messagebox.showinfo("About PDF Translator", about_text)
+        messagebox.showinfo("About PDF Translator", about_text, parent=self.root)
     
     def install_drag_drop_support(self):
         """Show instructions for installing drag and drop support"""
@@ -816,7 +974,8 @@ Current status: Using fallback method (click to select files)"""
         result = messagebox.askyesnocancel(
             "Install Drag & Drop Support", 
             install_text + "\n\nWould you like to attempt automatic installation now?",
-            default="yes"
+            default="yes",
+            parent=self.root
         )
         
         if result:  # Yes - attempt installation
@@ -832,21 +991,25 @@ Current status: Using fallback method (click to select files)"""
                     self.log_message("✓ tkinterdnd2 installed successfully!")
                     messagebox.showinfo("Installation Successful", 
                                       "tkinterdnd2 has been installed successfully!\n\n"
-                                      "Please restart the application to enable drag and drop.")
+                                      "Please restart the application to enable drag and drop.",
+                                      parent=self.root)
                 else:
                     self.log_message(f"✗ Installation failed: {result.stderr}")
                     messagebox.showerror("Installation Failed", 
                                        f"Failed to install tkinterdnd2:\n\n{result.stderr}\n\n"
-                                       "Please install manually using: pip install tkinterdnd2")
+                                       "Please install manually using: pip install tkinterdnd2",
+                                       parent=self.root)
                     
             except subprocess.TimeoutExpired:
                 messagebox.showerror("Installation Timeout", 
                                    "Installation timed out. Please install manually using:\n"
-                                   "pip install tkinterdnd2")
+                                   "pip install tkinterdnd2",
+                                   parent=self.root)
             except Exception as e:
                 messagebox.showerror("Installation Error", 
                                    f"Error during installation: {e}\n\n"
-                                   "Please install manually using: pip install tkinterdnd2")
+                                   "Please install manually using: pip install tkinterdnd2",
+                                   parent=self.root)
     
     def toggle_api_key_visibility(self):
         """Toggle visibility of the API key field"""
@@ -1086,7 +1249,8 @@ Current status: Using fallback method (click to select files)"""
             
             if not pdf_files:
                 messagebox.showwarning("No PDF Files", 
-                                     "No valid PDF files were found in the dropped items.")
+                                     "No valid PDF files were found in the dropped items.",
+                                     parent=self.root)
                 return
             
             # Add to existing selection or replace
@@ -1098,7 +1262,8 @@ Current status: Using fallback method (click to select files)"""
                     f"You already have {len(self.selected_files)} file(s) selected.\n\n"
                     f"Yes: Add to existing selection\n"
                     f"No: Replace existing selection\n"
-                    f"Cancel: Keep current selection"
+                    f"Cancel: Keep current selection",
+                    parent=self.root
                 )
                 
                 if response is None:  # Cancel
@@ -1111,7 +1276,7 @@ Current status: Using fallback method (click to select files)"""
                         self.selected_files.extend(new_files)
                         self.log_message(f"Added {len(new_files)} new PDF file(s)")
                     else:
-                        messagebox.showinfo("No New Files", "All dropped files were already selected.")
+                        messagebox.showinfo("No New Files", "All dropped files were already selected.", parent=self.root)
                         return
                 else:  # No - replace existing
                     self.selected_files = pdf_files
@@ -1136,7 +1301,7 @@ Current status: Using fallback method (click to select files)"""
             
         except Exception as e:
             self.logger.error(f"Error handling dropped files: {e}")
-            messagebox.showerror("Error", f"Error processing dropped files: {e}")
+            messagebox.showerror("Error", f"Error processing dropped files: {e}", parent=self.root)
     
     def _reset_drop_label_text(self):
         """Reset the drop label text to default"""
@@ -1162,7 +1327,10 @@ Current status: Using fallback method (click to select files)"""
         """Test connection to Ollama server"""
         try:
             url = self.ollama_url_var.get().rstrip('/')
-            response = requests.get(f"{url}/api/tags", timeout=5)
+            headers = {"Accept-Encoding": "identity"}
+            response = requests.get(f"{url}/api/tags", timeout=5, headers=headers, stream=True)
+            if response.headers.get("Content-Encoding") in ("gzip", "deflate", "br"):
+                raise Exception("Ollama server is sending compressed data despite Accept-Encoding: identity. Please check Ollama server configuration.")
             if response.status_code == 200:
                 self.connection_status_var.set("✓ Connected to Ollama")
                 self.connection_status_var.set("Connected.")
@@ -1172,7 +1340,7 @@ Current status: Using fallback method (click to select files)"""
                 raise Exception(f"HTTP {response.status_code}")
         except Exception as e:
             self.connection_status_var.set(f"✗ Connection failed: {e}")
-            messagebox.showerror("Connection Error", f"Failed to connect to Ollama: {e}")
+            messagebox.showerror("Connection Error", f"Failed to connect to Ollama: {e}", parent=self.root)
             self.log_message(f"Failed to connect to Ollama: {e}")
             return False
             
@@ -1180,7 +1348,8 @@ Current status: Using fallback method (click to select files)"""
         """Refresh available models from Ollama"""
         try:
             url = self.ollama_url_var.get().rstrip('/')
-            response = requests.get(f"{url}/api/tags", timeout=5)
+            headers = {"Accept-Encoding": "identity"}
+            response = requests.get(f"{url}/api/tags", timeout=5, headers=headers)
             if response.status_code == 200:
                 data = response.json()
                 models = [model['name'] for model in data.get('models', [])]
@@ -1210,11 +1379,11 @@ Current status: Using fallback method (click to select files)"""
                     ttk.Button(model_window, text="Select Model", 
                               command=select_model).pack(pady=10)
                 else:
-                    messagebox.showinfo("No Models", "No models found on Ollama server")
+                    messagebox.showinfo("No Models", "No models found on Ollama server", parent=self.root)
             else:
                 raise Exception(f"HTTP {response.status_code}")
         except Exception as e:
-            messagebox.showerror("Error", f"Failed to fetch models: {e}")
+            messagebox.showerror("Error", f"Failed to fetch models: {e}", parent=self.root)
             
     def log_message(self, message):
         """Add a message to the log"""
@@ -1242,18 +1411,18 @@ Current status: Using fallback method (click to select files)"""
             return True
         except Exception as e:
             self.log_message(f"Failed to create translator: {e}")
-            messagebox.showerror("Translator Error", f"Failed to create translator: {e}")
+            messagebox.showerror("Translator Error", f"Failed to create translator: {e}", parent=self.root)
             return False
             
     def start_translation(self):
         """Start the translation process"""
         if self.is_translating:
-            messagebox.showwarning("Translation in Progress", "Translation is already in progress")
+            messagebox.showwarning("Translation in Progress", "Translation is already in progress", parent=self.root)
             return
             
         # Validate inputs
         if not self.selected_files:
-            messagebox.showerror("No Files", "Please select PDF files to translate")
+            messagebox.showerror("No Files", "Please select PDF files to translate", parent=self.root)
             return
             
         if not self.test_ollama_connection():
@@ -1321,13 +1490,13 @@ Current status: Using fallback method (click to select files)"""
             # Translation completed
             self.root.after(0, lambda: self.status_var.set("Translation completed!"))
             self.root.after(0, lambda: self.log_message("All translations completed successfully!"))
-            self.root.after(0, lambda: messagebox.showinfo("Success", "All PDF files have been translated successfully!"))
+            self.root.after(0, lambda: messagebox.showinfo("Success", "All PDF files have been translated successfully!", parent=self.root))
             
         except Exception as e:
             error_msg = f"Translation failed: {e}"
             self.root.after(0, lambda: self.log_message(error_msg))
             self.root.after(0, lambda: self.status_var.set("Translation failed"))
-            self.root.after(0, lambda: messagebox.showerror("Translation Error", error_msg))
+            self.root.after(0, lambda: messagebox.showerror("Translation Error", error_msg, parent=self.root))
         finally:
             self.is_translating = False
             self.root.after(0, lambda: self.translate_button.config(text="Start Translation", state="normal"))
@@ -1354,7 +1523,28 @@ Current status: Using fallback method (click to select files)"""
 
 def main():
     """Main function to run the GUI application"""
+    ensure_o200k_base_encoding()
     root = tk.Tk()
+
+    # Set Dock icon for macOS using pyobjc if available, robust for PyInstaller
+    try:
+        import sys
+        if sys.platform == "darwin":
+            import os
+            # Use PyInstaller's _MEIPASS if available
+            icon_path = None
+            if hasattr(sys, '_MEIPASS'):
+                icon_path = os.path.join(sys._MEIPASS, "icons", "app_icon.icns")
+            else:
+                icon_path = os.path.join(os.path.dirname(__file__), "..", "icons", "app_icon.icns")
+            if os.path.exists(icon_path):
+                from AppKit import NSApplication, NSImage
+                app_ns = NSApplication.sharedApplication()
+                nsimage = NSImage.alloc().initWithContentsOfFile_(icon_path)
+                app_ns.setApplicationIconImage_(nsimage)
+    except Exception as e:
+        pass  # Fallback to Tkinter iconphoto
+
     app = PDFTranslatorGUI(root)
     
     # Handle window closing
@@ -1363,7 +1553,7 @@ def main():
         app.save_configuration()
         
         if app.is_translating:
-            if messagebox.askokcancel("Quit", "Translation is in progress. Do you want to quit?"):
+            if messagebox.askokcancel("Quit", "Translation is in progress. Do you want to quit?", parent=root):
                 root.destroy()
         else:
             root.destroy()
@@ -1373,4 +1563,6 @@ def main():
 
 
 if __name__ == "__main__":
+    import multiprocessing
+    multiprocessing.freeze_support()
     main()
