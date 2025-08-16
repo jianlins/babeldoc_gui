@@ -63,14 +63,12 @@ jobs:
             NEW_PATCH=$((PATCH + 1))
             NEW_VERSION="$MAJOR.$MINOR.$NEW_PATCH"
             NEW_TAG_NAME="v$NEW_VERSION"
-            echo "Bumped version to: $NEW_VERSION"
             {
               echo "new_version=$NEW_VERSION"
               echo "needs_bump=true"
               echo "tag_name=$NEW_TAG_NAME"
             } >> "$GITHUB_OUTPUT"
           else
-            echo "Tag $TAG_NAME does not exist, using current version"
             {
               echo "new_version=$CURRENT_VERSION"
               echo "needs_bump=false"
@@ -83,7 +81,6 @@ jobs:
         shell: bash
         run: |
           NEW_VERSION="${{ steps.bump_version.outputs.new_version }}"
-          echo "Updating _version.py with version: $NEW_VERSION"
           sed -i "s/__version__ = .*/__version__ = \"$NEW_VERSION\"/" src/_version.py
           cat src/_version.py
 
@@ -182,7 +179,6 @@ jobs:
             archive_extension: ".tar.gz"
     runs-on: ${{ matrix.os }}
     steps:
-      # —— 统一 bash 的“是否构建”判定（Windows / 非 Windows 共用同一输出）——
       - name: Check if platform should be built
         id: should_build
         shell: bash
@@ -204,7 +200,7 @@ jobs:
 
       - name: Set up Python
         if: steps.should_build.outputs.build == 'true'
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
           python-version: '3.12'
 
@@ -237,19 +233,19 @@ jobs:
         run: |
           choco install upx -y || echo "UPX installation failed, continuing without it"
 
-      - name: Create virtual environment
+      - name: Create and configure virtual environment
         if: steps.should_build.outputs.build == 'true'
         shell: bash
         run: |
           python -m venv venv
-          if [ -f "venv/Scripts/activate" ]; then
+          if [ -d "venv/Scripts" ]; then
+            # Windows
             echo "VIRTUAL_ENV=${{ github.workspace }}/venv" >> "$GITHUB_ENV"
             echo "${{ github.workspace }}/venv/Scripts" >> "$GITHUB_PATH"
-            echo 'source venv/Scripts/activate' >> "$GITHUB_ENV"
           else
+            # Linux / macOS
             echo "VIRTUAL_ENV=${{ github.workspace }}/venv" >> "$GITHUB_ENV"
             echo "${{ github.workspace }}/venv/bin" >> "$GITHUB_PATH"
-            echo 'source venv/bin/activate' >> "$GITHUB_ENV"
           fi
 
       - name: Upgrade pip and install build tools
