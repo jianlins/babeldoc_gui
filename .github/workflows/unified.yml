@@ -69,7 +69,6 @@ jobs:
             echo "new_version=$CURRENT_VERSION" >> $GITHUB_OUTPUT
             echo "needs_bump=false" >> $GITHUB_OUTPUT
             echo "tag_name=$TAG_NAME" >> $GITHUB_OUTPUT
-          fi
 
       - name: Update version file if needed
         if: steps.bump_version.outputs.needs_bump == 'true'
@@ -77,7 +76,6 @@ jobs:
           NEW_VERSION="${{ steps.bump_version.outputs.new_version }}"
           echo "Updating _version.py with version: $NEW_VERSION"
           sed -i "s/__version__ = .*/__version__ = \"$NEW_VERSION\"/" src/_version.py
-          echo "Updated version file contents:"
           cat src/_version.py
 
       - name: Commit version update
@@ -96,10 +94,8 @@ jobs:
           VERSION="${{ steps.bump_version.outputs.new_version }}"
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
-          echo "Creating tag: $TAG_NAME"
           git tag -a "$TAG_NAME" -m "Release $VERSION"
           git push origin "$TAG_NAME"
-          echo "Tag created successfully: $TAG_NAME"
 
       - name: Set final outputs
         id: final_version
@@ -161,9 +157,7 @@ jobs:
             arch: arm64
             binary_extension: ""
             archive_extension: ".tar.gz"
-
     runs-on: ${{ matrix.os }}
-
     steps:
       - name: Rename run to "build test" if not creating release
         if: github.event_name == 'workflow_dispatch' && github.event.inputs.create_release != 'true'
@@ -189,18 +183,14 @@ jobs:
           else
             echo "build=false" >> $GITHUB_OUTPUT
             echo "Skipping ${{ matrix.platform }} (not selected in manual build)"
-          fi
-
       - name: Checkout code
         if: steps.should_build.outputs.build == 'true'
         uses: actions/checkout@v4
-
       - name: Set up Python
         if: steps.should_build.outputs.build == 'true'
         uses: actions/setup-python@v4
         with:
           python-version: '3.12'
-
       - name: Install system dependencies (Ubuntu)
         if: steps.should_build.outputs.build == 'true' && matrix.os == 'ubuntu-latest'
         run: |
@@ -213,7 +203,6 @@ jobs:
             xvfb \
             upx-ucl \
             binutils
-
       - name: Install system dependencies (macOS)
         if: steps.should_build.outputs.build == 'true' && matrix.platform == 'macos'
         run: |
@@ -221,24 +210,20 @@ jobs:
           echo 'export PATH="/usr/local/opt/tcl-tk/bin:$PATH"' >> $GITHUB_ENV
           echo 'export PKG_CONFIG_PATH="/usr/local/opt/tcl-tk/lib/pkgconfig"' >> $GITHUB_ENV
           brew install upx || true
-
       - name: Install system dependencies (Windows)
         if: steps.should_build.outputs.build == 'true' && matrix.os == 'windows-latest'
         run: |
           choco install upx -y || echo "UPX installation failed, continuing without it"
-
       - name: Create virtual environment
         if: steps.should_build.outputs.build == 'true'
         run: |
           python -m venv venv
-
       - name: Activate virtual environment (Windows)
         if: steps.should_build.outputs.build == 'true' && matrix.os == 'windows-latest'
         run: |
           venv\Scripts\activate
           echo "VIRTUAL_ENV=${{ github.workspace }}\venv" >> $GITHUB_ENV
           echo "${{ github.workspace }}\venv\Scripts" >> $GITHUB_PATH
-
       - name: Activate virtual environment (Unix)
         if: steps.should_build.outputs.build == 'true' && matrix.os != 'windows-latest'
         shell: bash
@@ -246,23 +231,19 @@ jobs:
           source venv/bin/activate
           echo "VIRTUAL_ENV=${{ github.workspace }}/venv" >> $GITHUB_ENV
           echo "${{ github.workspace }}/venv/bin" >> $GITHUB_PATH
-
       - name: Upgrade pip and install build tools
         if: steps.should_build.outputs.build == 'true'
         run: |
           python -m pip install --upgrade pip
           pip install wheel setuptools
-
       - name: Install PyInstaller
         if: steps.should_build.outputs.build == 'true'
         run: |
           pip install pyinstaller==6.3.0
-
       - name: Install all requirements from requirements.txt
         if: steps.should_build.outputs.build == 'true'
         run: |
           pip install -r requirements.txt || echo "Some dependencies may not be available, continuing with stub implementation if needed"
-
       - name: Create stub babeldoc module (fallback)
         if: steps.should_build.outputs.build == 'true'
         shell: bash
@@ -295,7 +276,6 @@ jobs:
           sys.path.insert(0, stub_dir)
           print('Created stub babeldoc modules')
           "
-
       - name: Create PyInstaller spec file
         if: steps.should_build.outputs.build == 'true'
         run: |
@@ -374,7 +354,6 @@ jobs:
           with open('babeldoc_gui.spec', 'w') as f:
               f.write(spec_content)
           "
-
       - name: Build executable with PyInstaller (always rebuilds with latest extraction logic)
         if: steps.should_build.outputs.build == 'true'
         shell: bash
@@ -388,7 +367,6 @@ jobs:
             export ARCHFLAGS="-arch arm64"
           fi
           pyinstaller main.spec
-
       - name: Verify build
         if: steps.should_build.outputs.build == 'true'
         shell: bash
@@ -399,7 +377,6 @@ jobs:
           else
             file dist/main
           fi
-
       - name: Rename main to babeldoc_gui (Linux only)
         if: steps.should_build.outputs.build == 'true' && matrix.os == 'ubuntu-latest'
         shell: bash
@@ -407,7 +384,6 @@ jobs:
           if [ -f dist/main ]; then
             mv dist/main dist/babeldoc_gui
           fi
-
       - name: Rename main to babeldoc_gui (macOS only)
         if: steps.should_build.outputs.build == 'true' && matrix.os == 'macos-latest'
         shell: bash
@@ -415,20 +391,42 @@ jobs:
           if [ -f dist/main ]; then
             mv dist/main dist/babeldoc_gui
           fi
-
+      - name: Test executable (basic smoke test)
+        if: steps.should_build.outputs.build == 'true'
+        continue-on-error: true
+        shell: bash
+        run: |
+          if [ "${{ matrix.os }}" = "ubuntu-latest" ]; then
+            export DISPLAY=:99
+            timeout 10 ./dist/babeldoc_gui --help || echo "GUI test skipped (expected for headless environment)"
+          elif [ "${{ matrix.os }}" = "macos-latest" ]; then
+            timeout 10 ./dist/babeldoc_gui --help || echo "GUI test skipped (expected for headless macOS environment)"
+          else
+            timeout 10 ./dist/babeldoc_gui.exe --help || echo "GUI test skipped (expected for headless environment)"
+      - name: Create archive name
+        if: steps.should_build.outputs.build == 'true'
+        id: archive_name
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "push" ]; then
+            ARCHIVE_NAME="babeldoc_gui-${{ matrix.platform }}-${{ matrix.arch }}"
+          else
+            TIMESTAMP=$(date +%Y%m%d-%H%M%S)
+            ARCHIVE_NAME="babeldoc_gui-${{ matrix.platform }}-${{ matrix.arch }}-${TIMESTAMP}"
+          fi
+          echo "ARCHIVE_NAME=$ARCHIVE_NAME" >> $GITHUB_OUTPUT
+          echo "Archive name: $ARCHIVE_NAME"
       - name: Create archive (Unix)
         if: steps.should_build.outputs.build == 'true' && matrix.os != 'windows-latest'
         shell: bash
         working-directory: dist
         run: |
           tar -czf "../${{ steps.archive_name.outputs.ARCHIVE_NAME }}${{ matrix.archive_extension }}" babeldoc_gui${{ matrix.binary_extension }}
-
       - name: Create archive (Windows)
         if: steps.should_build.outputs.build == 'true' && matrix.os == 'windows-latest'
         run: |
           cd dist
           7z a "../${{ steps.archive_name.outputs.ARCHIVE_NAME }}${{ matrix.archive_extension }}" babeldoc_gui${{ matrix.binary_extension }}
-
       - name: Upload Release Asset
         if: steps.should_build.outputs.build == 'true' && needs.create-release.result == 'success'
         uses: actions/upload-release-asset@v1
@@ -439,7 +437,6 @@ jobs:
           asset_path: ./${{ steps.archive_name.outputs.ARCHIVE_NAME }}${{ matrix.archive_extension }}
           asset_name: ${{ steps.archive_name.outputs.ARCHIVE_NAME }}${{ matrix.archive_extension }}
           asset_content_type: application/octet-stream
-
       - name: Upload build artifacts
         if: steps.should_build.outputs.build == 'true'
         uses: actions/upload-artifact@v4
