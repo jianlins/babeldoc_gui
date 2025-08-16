@@ -34,20 +34,27 @@ A Python GUI application for translating PDF files to Chinese using BabelDOC and
 
 ## Installation
 
-1. Activate your conda environment:
-   ```bash
-   conda activate pdf
-   ```
+Download the compiled binary for your platform from the [GitHub Releases page](https://github.com/jianlins/babeldoc_gui/releases).
 
-2. Install additional requirements:
-   ```bash
-   pip install requests
-   ```
+### macOS
 
-3. Run the application:
-   ```bash
-   python src/main.py
-   ```
+1. Download the `.tar.gz` archive for macOS (arm64) from the Releases page.
+2. Extract the archive and locate `babeldoc_gui` or `main.app`.
+3. Double-click to launch the application.
+
+### Windows
+
+1. Download the `.zip` archive for Windows from the Releases page.
+2. Extract the archive and locate `babeldoc_gui.exe`.
+3. Double-click to launch the application.
+
+### Linux
+
+1. Download the `.tar.gz` archive for Linux from the Releases page.
+2. Extract the archive and locate `babeldoc_gui`.
+3. Run the executable file directly.
+
+No Python environment setup is required for the binary version.
 
 ## Usage
 
