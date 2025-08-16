@@ -3,6 +3,21 @@
 import sys
 import os
 
+from PyInstaller.utils.hooks import collect_submodules, collect_data_files
+
+scipy_hidden = collect_submodules("scipy")
+scipy_datas = collect_data_files("scipy")
+
+hiddenimports = [
+    "tiktoken_ext.openai_public",
+    # keep your platform conditions (e.g., AppKit on mac) as before
+]
+hiddenimports += scipy_hidden                   # <-- add
+
+datas = (datas if 'datas' in globals() else []) # if you already defined datas
+datas += scipy_datas  
+
+
 IS_MAC = sys.platform == "darwin"
 IS_WIN = sys.platform == "win32"
 IS_LIN = sys.platform.startswith("linux")

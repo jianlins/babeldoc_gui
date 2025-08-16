@@ -165,14 +165,7 @@ try:
         print(f"Failed to download BabelDOC assets: {e}")
 except ImportError as e:
     print(f"Error importing BabelDOC: {e}")
-    print("\nIMPORTANT: Please ensure you're running this in the correct conda environment!")
-    print("Steps to fix this:")
-    print("1. Activate the 'pdf' conda environment:")
-    print("   conda activate pdf")
-    print("2. Then run the application:")
-    print("   python src/main.py")
-    print("\nAlternatively, use the launcher script:")
-    print("   ./run.sh")
+    print("\nIMPORTANT: Please ensure you're running this in the correct environment!")
     
     # Try to show a simple error dialog (only once, main thread only)
     try:
@@ -187,10 +180,6 @@ except ImportError as e:
                 messagebox.showerror(
                     "BabelDOC Not Found", 
                     f"Error importing BabelDOC: {e}\n\n"
-                    "Please ensure you're running this in the 'pdf' conda environment:\n"
-                    "1. conda activate pdf\n"
-                    "2. python src/main.py\n\n"
-                    "Or use the launcher script: ./run.sh"
                 )
                 root.destroy()
     except:
@@ -201,14 +190,7 @@ except Exception as e:
     print(f"Failed to download BabelDOC assets: {e}")
 except ImportError as e:
     print(f"Error importing BabelDOC: {e}")
-    print("\nIMPORTANT: Please ensure you're running this in the correct conda environment!")
-    print("Steps to fix this:")
-    print("1. Activate the 'pdf' conda environment:")
-    print("   conda activate pdf")
-    print("2. Then run the application:")
-    print("   python src/main.py")
-    print("\nAlternatively, use the launcher script:")
-    print("   ./run.sh")
+    print("\nIMPORTANT: Please ensure you're running this in the correct environment!")
     
     # Try to show a simple error dialog
     try:
@@ -219,10 +201,7 @@ except ImportError as e:
         messagebox.showerror(
             "BabelDOC Not Found", 
             f"Error importing BabelDOC: {e}\n\n"
-            "Please ensure you're running this in the 'pdf' conda environment:\n"
-            "1. conda activate pdf\n"
-            "2. python src/main.py\n\n"
-            "Or use the launcher script: ./run.sh"
+            "Please ensure you're running this in the right environment:\n"
         )
         root.destroy()
     except:
@@ -957,14 +936,7 @@ pip install tkinterdnd2
         install_text = """Drag and Drop Support Installation
 
 For the best drag and drop experience, especially on macOS ARM (M1/M2), 
-please install the tkinterdnd2 package:
-
-1. Open Terminal/Command Prompt
-2. Activate your conda environment:
-   conda activate pdf
-3. Install tkinterdnd2:
-   pip install tkinterdnd2
-4. Restart this application
+please install the tkinterdnd2 package: pip install tkinterdnd2
 
 This will enable native drag and drop support with better reliability
 and visual feedback.
